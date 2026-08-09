@@ -9,6 +9,7 @@ import {
   Timeline,
   Vulnerabilities,
 } from "@/components/report/sections";
+import { ThreatIntel } from "@/components/report/ThreatIntel";
 import {
   Badge,
   Button,
@@ -16,6 +17,7 @@ import {
   CardHeader,
   CardTitle,
   ErrorState,
+  IntegrityBadge,
   LoadingState,
   Separator,
   Skeleton,
@@ -25,7 +27,7 @@ import {
 } from "@/components/ui";
 import { useDeleteReport, useReport } from "@/hooks/queries";
 import { errorMessage } from "@/lib/apiClient";
-import { formatDateTime, severityCounts, shortId } from "@/lib/format";
+import { formatDateTime, integrityToken, severityCounts, shortId } from "@/lib/format";
 
 /**
  * Section order matches the order the backend generates them in, which is also
@@ -94,6 +96,7 @@ export function ReportDetail() {
             </h1>
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               <StatusBadge status={report.status} />
+              <IntegrityBadge state={report.integrity_state} />
               <Badge variant="outline">{report.classification}</Badge>
               <span className="text-[0.8125rem] text-ink-faint">
                 {formatDateTime(report.generated_at)}
@@ -115,9 +118,12 @@ export function ReportDetail() {
           </Button>
         </div>
 
-        <div className="mt-6 rounded-lg border border-line bg-surface px-5 py-4">
-          <p className="eyebrow mb-3">Severity profile</p>
-          <SeveritySpine counts={severityCounts(risks)} height="h-2" showLegend />
+        <div className="mt-6 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
+          <div className="rounded-lg border border-line bg-surface px-5 py-4">
+            <p className="eyebrow mb-3">Severity profile</p>
+            <SeveritySpine counts={severityCounts(risks)} height="h-2" showLegend />
+          </div>
+          <Integrity report={report} />
         </div>
       </header>
 
@@ -135,8 +141,54 @@ export function ReportDetail() {
             <Component items={report.sections[key]} />
           </Card>
         ))}
+
+        <Card id="threat_intel" className="overflow-hidden scroll-mt-20">
+          <CardHeader>
+            <CardTitle>Threat intelligence</CardTitle>
+            <span className="font-mono text-xs tabular-nums text-ink-faint">
+              {report.threat_intel?.length ?? 0}
+            </span>
+          </CardHeader>
+          <ThreatIntel items={report.threat_intel} />
+        </Card>
       </div>
     </>
+  );
+}
+
+/**
+ * File integrity for the source log.
+ *
+ * The sealed hash is shown in full rather than shortened: it is the evidence,
+ * and an analyst comparing it against something else needs all of it.
+ */
+function Integrity({ report }) {
+  const token = integrityToken(report.integrity_state);
+
+  return (
+    <div className={`rounded-lg border ${token.border} ${token.tint} px-5 py-4`}>
+      <div className="flex items-center justify-between gap-3">
+        <p className="eyebrow">Source integrity</p>
+        <IntegrityBadge state={report.integrity_state} />
+      </div>
+
+      <p className="mt-2.5 text-[0.8125rem] leading-snug text-ink-dim">{token.description}</p>
+
+      <dl className="mt-3 space-y-1.5 text-xs">
+        <div className="flex gap-2">
+          <dt className="shrink-0 text-ink-faint">Sealed hash</dt>
+          <dd className="ident min-w-0 break-all text-ink-dim">
+            {report.file_hash ?? "not recorded — the source file was unreadable"}
+          </dd>
+        </div>
+        <div className="flex gap-2">
+          <dt className="shrink-0 text-ink-faint">Last checked</dt>
+          <dd className="text-ink-dim">
+            {report.integrity_checked_at ? formatDateTime(report.integrity_checked_at) : "never"}
+          </dd>
+        </div>
+      </dl>
+    </div>
   );
 }
 

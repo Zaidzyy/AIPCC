@@ -2,6 +2,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 
 import { IntroSequence } from "@/components/common/IntroSequence";
 import { AppShell } from "@/components/layout/AppShell";
+import { Alerts } from "@/pages/Alerts";
 import { Chat } from "@/pages/Chat";
 import { Dashboard } from "@/pages/Dashboard";
 import { Generate } from "@/pages/Generate";
@@ -35,6 +36,7 @@ export default function App() {
             <Route path="/generate" element={<Generate />} />
             <Route path="/reports" element={<Reports />} />
             <Route path="/reports/:reportId" element={<ReportDetail />} />
+            <Route path="/alerts" element={<Alerts />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />

@@ -57,4 +57,3 @@
 .fm-wave .bars{display:flex;align-items:center;gap:5px;height:60%}
 .fm-wave .bars i{width:5px;border-radius:3px;background:linear-gradient(180deg,var(--fm-cyan),var(--fm-cyan-deep));filter:drop-shadow(0 0 5px rgba(34,211,238,.5));animation:fm-eq 1.4s ease-in-out infinite}
 @keyframes fm-eq{0%,100%{height:14%}50%{height:100%}}
-</content>

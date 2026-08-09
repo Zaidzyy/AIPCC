@@ -16,6 +16,7 @@ import {
   DialogTitle,
   EmptyState,
   ErrorState,
+  IntegrityBadge,
   Input,
   Select,
   SelectContent,
@@ -142,6 +143,7 @@ export function Reports() {
               <TR className="hover:bg-transparent">
                 <TH>Report</TH>
                 <TH>Status</TH>
+                <TH className="hidden lg:table-cell">Integrity</TH>
                 <TH className="hidden md:table-cell">Classification</TH>
                 <TH className="hidden sm:table-cell">Generated</TH>
                 <TH className="w-12 text-right">
@@ -167,6 +169,9 @@ export function Reports() {
                   </TD>
                   <TD className="align-middle">
                     <StatusBadge status={report.status} />
+                  </TD>
+                  <TD className="hidden align-middle lg:table-cell">
+                    <IntegrityBadge state={report.integrity_state} />
                   </TD>
                   <TD className="hidden align-middle md:table-cell">
                     <Badge variant="outline">{report.classification}</Badge>

@@ -6,6 +6,7 @@
  * `components/` or `pages/` imports axios directly.
  */
 
+export * as alertsApi from "./alerts";
 export * as authApi from "./auth";
 export * as chatApi from "./chat";
 export * as dashboardApi from "./dashboard";

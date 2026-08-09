@@ -5,6 +5,7 @@ Run deliberately — never on startup:
     python -m app.db.seed              # admin user + sample document row
     python -m app.db.seed --ingest     # also embed the sample CSV into Chroma
     python -m app.db.seed --demo       # also write six weeks of demo reports
+    python -m app.db.seed --service-token   # also mint an API key for n8n
     python -m app.db.seed --reset      # delete seeded rows first, then re-seed
 
 `--ingest` is opt-in because it loads the MiniLM embedding model, which is a
@@ -21,6 +22,7 @@ not create tables.
 from __future__ import annotations
 
 import argparse
+import secrets
 import shutil
 import sys
 from datetime import datetime, timezone
@@ -42,9 +44,12 @@ ADMIN_PASSWORD = "admin"  # noqa: S105 — local demo credential, documented in 
 # watch the ownership scoping do its job: the same dashboard, smaller numbers.
 ANALYST_EMAIL = "analyst@aipcc.io"
 ANALYST_PASSWORD = "analyst"  # noqa: S105 — local demo credential
+# The account the n8n workflows authenticate as. It has no usable password —
+# see `seed_service_account` — because it is not meant to be logged into.
+SERVICE_EMAIL = "n8n@aipcc.io"
 SAMPLE_CSV = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic_pegasus_dataset.csv"
 
-SEEDED_EMAILS = (ADMIN_EMAIL, ANALYST_EMAIL)
+SEEDED_EMAILS = (ADMIN_EMAIL, ANALYST_EMAIL, SERVICE_EMAIL)
 
 
 def _seed_user(db, *, email: str, password: str, role: str, first: str, last: str) -> Users:
@@ -128,6 +133,66 @@ def seed_sample_document(db, owner: Users) -> Document | None:
     return document
 
 
+def seed_service_account(db) -> str:
+    """Create the n8n service account and mint it a fresh API key.
+
+    The account is an admin because the FIM engine polls `/get_all_reports`,
+    which is scoped — a non-admin service account would only ever audit its own
+    reports, which is the opposite of what a monitoring workflow is for.
+
+    Its password hash is a random value nobody holds, so the account cannot be
+    logged into through `/auth/login` at all. It authenticates only with an API
+    key, and API keys are refused by the routes that manage users and
+    credentials (`require_human`). A leaked key can therefore read and write
+    report data, and cannot escalate.
+
+    Re-running mints a new key and revokes the previous ones: the old secret
+    was shown exactly once and cannot be recovered, so there is nothing to be
+    gained by keeping it alive.
+    """
+    from app.core.api_key import generate_key
+    from app.db.models import ApiKey
+
+    service = db.scalar(select(Users).where(Users.email == SERVICE_EMAIL))
+    if service is None:
+        service = Users(
+            first_name="n8n",
+            last_name="Service",
+            email=SERVICE_EMAIL,
+            role="admin",
+            status="Active",
+            # Not a password anyone knows — this account has no login path.
+            password_hash=hash_password(secrets.token_urlsafe(32)),
+            organization="AIPCC",
+            location="UAE",
+            bio="Service account for the n8n Orchestrator and FIM workflows.",
+        )
+        db.add(service)
+        db.flush()
+        print(f"created service account: {service.email} ({service.user_id})")
+
+    revoked = 0
+    for existing in db.scalars(select(ApiKey).where(ApiKey.user_id == service.user_id)):
+        if not existing.revoked:
+            existing.revoked = True
+            revoked += 1
+
+    generated = generate_key()
+    db.add(
+        ApiKey(
+            name="n8n workflows",
+            prefix=generated.prefix,
+            key_hash=generated.key_hash,
+            user_id=service.user_id,
+        )
+    )
+    db.flush()
+
+    if revoked:
+        print(f"revoked {revoked} previously issued key(s) for {SERVICE_EMAIL}")
+    return generated.secret
+
+
 def reset(db) -> None:
     """Delete seeded rows. Cascades remove dependent documents/reports/chats."""
     deleted = 0
@@ -152,6 +217,11 @@ def main(argv: list[str] | None = None) -> int:
         "--demo",
         action="store_true",
         help="write six weeks of deterministic demo reports so the dashboard is populated",
+    )
+    parser.add_argument(
+        "--service-token",
+        action="store_true",
+        help="create the n8n service account and print a fresh API key (revokes its old ones)",
     )
     parser.add_argument(
         "--reset", action="store_true", help="delete seeded rows before seeding"
@@ -180,7 +250,17 @@ def main(argv: list[str] | None = None) -> int:
                 f"reports from {SAMPLE_CSV.name} (seeded with --ingest)"
             )
 
+        service_key = seed_service_account(db) if args.service_token else None
+
         db.commit()
+
+        if service_key:
+            print()
+            print("n8n API key (shown once — only its SHA-256 is stored):")
+            print(f"  {service_key}")
+            print("  Use it in n8n as a Header Auth credential:")
+            print(f"    Authorization: Bearer {service_key}")
+            print()
 
         if args.ingest and document is not None:
             # Imported here so the default path never loads the embedding model.

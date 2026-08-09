@@ -6,6 +6,18 @@
         "assignments": {
           "assignments": [
             {
+              "id": "carry-document-id",
+              "name": "document_id",
+              "value": "={{ $json.document_id }}",
+              "type": "string"
+            },
+            {
+              "id": "carry-document-name",
+              "name": "document_name",
+              "value": "={{ $json.document_name }}",
+              "type": "string"
+            },
+            {
               "id": "3dace635-b4a9-453c-ae1a-fab3a6e6b830",
               "name": "title",
               "value": "=Auto Generated Security Incident",
@@ -76,7 +88,7 @@
         976
       ],
       "id": "73dbc99a-17e2-45ef-8323-ee94b2a54d74",
-      "name": "LLM – Groq Inference",
+      "name": "LLM \u2013 Groq Inference",
       "credentials": {
         "groqApi": {
           "id": "x5kh2SPmEbKPvDoO",
@@ -91,27 +103,9 @@
         "authentication": "genericCredentialType",
         "genericAuthType": "httpHeaderAuth",
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            {
-              "name": "report_json",
-              "value": "={{$node[\"Edit Fields\"].json.parsed_report}}"
-            },
-            {
-              "name": "classification",
-              "value": "Internal"
-            },
-            {
-              "name": "user_id",
-              "value": "system"
-            },
-            {
-              "name": "generated_filename",
-              "value": "={{$node[\"Upload Report File\"].json.filename}}"
-            }
-          ]
-        },
-        "options": {}
+        "options": {},
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({\n  document_id: $('Normalize Input Data').item.json.document_id,\n  report_name: 'Orchestrator \u2014 ' + $('Normalize Input Data').item.json.document_name,\n  classification: $('Normalize Input Data').item.json.visibility || 'Internal',\n  sections: {\n    attack_types: $json.parsed_report?.attack_types ?? [],\n    general_risk_assessment: $json.parsed_report?.general_risk_assessment ?? [],\n    vulnerabilities: $json.parsed_report?.vulnerabilities ?? [],\n    anomalies: $json.parsed_report?.anomalies ?? [],\n    timeline: $json.parsed_report?.timeline ?? []\n  },\n  threat_intel: ($('Risk Scoring Engine').item.json.classified_iocs ?? []).map(ioc => {\n    const looked_up = ioc.value === $('Risk Scoring Engine').item.json.data?.ipAddress;\n    return {\n      indicator: ioc.value,\n      indicator_type: ioc.type === 'IP Address' ? 'ip'\n        : ioc.type === 'File Hash' ? 'hash' : 'domain',\n      category: ioc.category,\n      source: looked_up ? 'abuseipdb' : 'n8n',\n      reputation_score: looked_up\n        ? $('Risk Scoring Engine').item.json.ip_reputation_score : null,\n      risk_level: looked_up\n        ? $('Risk Scoring Engine').item.json.ti_risk_level : null,\n      country: looked_up ? $('Risk Scoring Engine').item.json.ip_country : null,\n      usage_type: looked_up ? $('Risk Scoring Engine').item.json.ip_usage_type : null\n    };\n  })\n}) }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
@@ -123,8 +117,8 @@
       "name": "Save AI Analysis",
       "credentials": {
         "httpHeaderAuth": {
-          "id": "fhVmPlxwHyYlaTbq",
-          "name": "Header Auth account"
+          "id": "aipcc-api-key",
+          "name": "AIPCC API Key"
         }
       }
     },
@@ -157,8 +151,8 @@
       "name": "Upload Report File",
       "credentials": {
         "httpHeaderAuth": {
-          "id": "fhVmPlxwHyYlaTbq",
-          "name": "Header Auth account"
+          "id": "aipcc-api-key",
+          "name": "AIPCC API Key"
         }
       }
     },
@@ -293,7 +287,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const {\n  Document,\n  Packer,\n  Paragraph,\n  HeadingLevel,\n  Table,\n  TableRow,\n  TableCell,\n  AlignmentType,\n  ImageRun\n} = require(\"docx\");\n\nconst fs = require(\"fs\");\n\nconst data = $input.first().json;\nconst report = data.parsed_report || {};\n\n// ==========================\n// SAFE EXTRACTION\n// ==========================\n\nconst title = report.title || \"Security Incident Report\";\nconst severity = report.severity || \"UNKNOWN\";\nconst createdAt = report.created_at || \"\";\nconst createdBy = report.created_by || \"SOC-AI\";\n\nconst sections = report.sections || {};\nconst attacks = report.attacks || [];\n\nconst executive = sections.executive_summary || \"\";\nconst risk = sections.risk_explanation || \"\";\nconst anomaly = sections.anomaly_analysis || \"\";\nconst mitigation = sections.mitigation_recommendations || \"\";\nconst execution = sections.execution_summary || \"\";\n\nconst attack = attacks[0] || {};\n\nconst mitreId = attack.attack_mitre_technique_id || \"-\";\nconst mitreName = attack.attack_mitre_technique_name || \"-\";\nconst confidence = Math.round((attack.confidence_score || 0) * 100);\n\n// ==========================\n// VISUAL BAR FUNCTION\n// ==========================\n\nfunction bar(score) {\n  const filled = Math.floor(score / 5);\n  return \"█\".repeat(filled) + \"░\".repeat(20 - filled);\n}\n\n// ==========================\n// LOAD LOGO (OPTIONAL)\n// ==========================\n\nlet logo;\ntry {\n  logo = fs.readFileSync(\"/files/adnoc_logo.jpeg\");\n} catch {}\n\n// ==========================\n// MITRE TABLE (DYNAMIC)\n// ==========================\n\nconst mitreTable = new Table({\n  rows: [\n    new TableRow({\n      children: [\n        new TableCell({ children: [new Paragraph(\"Technique ID\")] }),\n        new TableCell({ children: [new Paragraph(\"Technique Name\")] }),\n        new TableCell({ children: [new Paragraph(\"Confidence (%)\")] })\n      ]\n    }),\n    new TableRow({\n      children: [\n        new TableCell({ children: [new Paragraph(mitreId)] }),\n        new TableCell({ children: [new Paragraph(mitreName)] }),\n        new TableCell({ children: [new Paragraph(confidence.toString())] })\n      ]\n    })\n  ]\n});\n\n// ==========================\n// DOCUMENT CHILDREN\n// ==========================\n\nconst children = [];\n\n// Logo\nif (logo) {\n  children.push(\n    new Paragraph({\n      children: [\n        new ImageRun({\n          data: logo,\n          transformation: { width: 200, height: 100 }\n        })\n      ],\n      alignment: AlignmentType.CENTER\n    })\n  );\n}\n\n// Title Section\nchildren.push(\n  new Paragraph({\n    text: \"AI SECURITY REPORT\",\n    heading: HeadingLevel.HEADING_1,\n    alignment: AlignmentType.CENTER\n  }),\n  new Paragraph(\"\"),\n  new Paragraph(`Incident Title: ${title}`),\n  new Paragraph(`Severity: ${severity}`),\n  new Paragraph(\"\"),\n  new Paragraph(`Threat Confidence: ${confidence}%`),\n  new Paragraph(bar(confidence)),\n  new Paragraph(\"\")\n);\n\n// Section Builder\nfunction section(title, content) {\n  children.push(\n    new Paragraph({\n      text: title,\n      heading: HeadingLevel.HEADING_2\n    }),\n    new Paragraph(content || \"No data available\"),\n    new Paragraph(\"\")\n  );\n}\n\n// Sections (FROM AI JSON — no parsing)\nsection(\"EXECUTIVE SUMMARY\", executive);\nsection(\"RISK EXPLANATION\", risk);\nsection(\"ANOMALY ANALYSIS\", anomaly);\nsection(\"MITIGATION RECOMMENDATIONS\", mitigation);\nsection(\"EXECUTION SUMMARY\", execution);\n\n// MITRE Section\nchildren.push(\n  new Paragraph({\n    text: \"MITRE ATT&CK Mapping\",\n    heading: HeadingLevel.HEADING_2\n  }),\n  mitreTable,\n  new Paragraph(\"\")\n);\n\n// Footer\nchildren.push(\n  new Paragraph(`Report Generated By: ${createdBy}`),\n  new Paragraph(`Date & Time: ${createdAt}`)\n);\n\n// ==========================\n// BUILD DOCUMENT\n// ==========================\n\nconst doc = new Document({\n  sections: [\n    {\n      children\n    }\n  ]\n});\n\nconst buffer = await Packer.toBuffer(doc);\n\nconst binary = await this.helpers.prepareBinaryData(\n  buffer,\n  `ADNOC_Security_Report_${Date.now()}.docx`,\n  \"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"\n);\n\nreturn [\n  {\n    json: {},\n    binary: {\n      file: binary\n    }\n  }\n];"
+        "jsCode": "const {\n  Document,\n  Packer,\n  Paragraph,\n  HeadingLevel,\n  Table,\n  TableRow,\n  TableCell,\n  AlignmentType,\n  ImageRun\n} = require(\"docx\");\n\nconst fs = require(\"fs\");\n\nconst data = $input.first().json;\nconst report = data.parsed_report || {};\n\n// ==========================\n// SAFE EXTRACTION\n// ==========================\n\nconst title = report.title || \"Security Incident Report\";\nconst severity = report.severity || \"UNKNOWN\";\nconst createdAt = report.created_at || \"\";\nconst createdBy = report.created_by || \"SOC-AI\";\n\nconst sections = report.sections || {};\nconst attacks = report.attacks || [];\n\nconst executive = sections.executive_summary || \"\";\nconst risk = sections.risk_explanation || \"\";\nconst anomaly = sections.anomaly_analysis || \"\";\nconst mitigation = sections.mitigation_recommendations || \"\";\nconst execution = sections.execution_summary || \"\";\n\nconst attack = attacks[0] || {};\n\nconst mitreId = attack.attack_mitre_technique_id || \"-\";\nconst mitreName = attack.attack_mitre_technique_name || \"-\";\nconst confidence = Math.round((attack.confidence_score || 0) * 100);\n\n// ==========================\n// VISUAL BAR FUNCTION\n// ==========================\n\nfunction bar(score) {\n  const filled = Math.floor(score / 5);\n  return \"\u2588\".repeat(filled) + \"\u2591\".repeat(20 - filled);\n}\n\n// ==========================\n// LOAD LOGO (OPTIONAL)\n// ==========================\n\nlet logo;\ntry {\n  logo = fs.readFileSync(\"/files/adnoc_logo.jpeg\");\n} catch {}\n\n// ==========================\n// MITRE TABLE (DYNAMIC)\n// ==========================\n\nconst mitreTable = new Table({\n  rows: [\n    new TableRow({\n      children: [\n        new TableCell({ children: [new Paragraph(\"Technique ID\")] }),\n        new TableCell({ children: [new Paragraph(\"Technique Name\")] }),\n        new TableCell({ children: [new Paragraph(\"Confidence (%)\")] })\n      ]\n    }),\n    new TableRow({\n      children: [\n        new TableCell({ children: [new Paragraph(mitreId)] }),\n        new TableCell({ children: [new Paragraph(mitreName)] }),\n        new TableCell({ children: [new Paragraph(confidence.toString())] })\n      ]\n    })\n  ]\n});\n\n// ==========================\n// DOCUMENT CHILDREN\n// ==========================\n\nconst children = [];\n\n// Logo\nif (logo) {\n  children.push(\n    new Paragraph({\n      children: [\n        new ImageRun({\n          data: logo,\n          transformation: { width: 200, height: 100 }\n        })\n      ],\n      alignment: AlignmentType.CENTER\n    })\n  );\n}\n\n// Title Section\nchildren.push(\n  new Paragraph({\n    text: \"AI SECURITY REPORT\",\n    heading: HeadingLevel.HEADING_1,\n    alignment: AlignmentType.CENTER\n  }),\n  new Paragraph(\"\"),\n  new Paragraph(`Incident Title: ${title}`),\n  new Paragraph(`Severity: ${severity}`),\n  new Paragraph(\"\"),\n  new Paragraph(`Threat Confidence: ${confidence}%`),\n  new Paragraph(bar(confidence)),\n  new Paragraph(\"\")\n);\n\n// Section Builder\nfunction section(title, content) {\n  children.push(\n    new Paragraph({\n      text: title,\n      heading: HeadingLevel.HEADING_2\n    }),\n    new Paragraph(content || \"No data available\"),\n    new Paragraph(\"\")\n  );\n}\n\n// Sections (FROM AI JSON \u2014 no parsing)\nsection(\"EXECUTIVE SUMMARY\", executive);\nsection(\"RISK EXPLANATION\", risk);\nsection(\"ANOMALY ANALYSIS\", anomaly);\nsection(\"MITIGATION RECOMMENDATIONS\", mitigation);\nsection(\"EXECUTION SUMMARY\", execution);\n\n// MITRE Section\nchildren.push(\n  new Paragraph({\n    text: \"MITRE ATT&CK Mapping\",\n    heading: HeadingLevel.HEADING_2\n  }),\n  mitreTable,\n  new Paragraph(\"\")\n);\n\n// Footer\nchildren.push(\n  new Paragraph(`Report Generated By: ${createdBy}`),\n  new Paragraph(`Date & Time: ${createdAt}`)\n);\n\n// ==========================\n// BUILD DOCUMENT\n// ==========================\n\nconst doc = new Document({\n  sections: [\n    {\n      children\n    }\n  ]\n});\n\nconst buffer = await Packer.toBuffer(doc);\n\nconst binary = await this.helpers.prepareBinaryData(\n  buffer,\n  `ADNOC_Security_Report_${Date.now()}.docx`,\n  \"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"\n);\n\nreturn [\n  {\n    json: {},\n    binary: {\n      file: binary\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -306,7 +300,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const data = $input.first().json;\n\n// Initialize score\nlet score = 0;\n\n// 1. AbuseIPDB score contribution (0–40)\nconst abuseScore = data.ip_reputation_score || 0;\nscore += Math.min(abuseScore * 0.4, 40);\n\n// 2. Indicator count contribution (0–25)\nconst ipCount = data.extracted_indicators?.ip_addresses?.length || 0;\nconst hashCount = data.extracted_indicators?.sha256_hashes?.length || 0;\n\nconst indicatorScore = (ipCount * 5) + (hashCount * 8);\nscore += Math.min(indicatorScore, 25);\n\n// 3. Severity contribution (0–20)\nconst severity = (data.severity || \"\").toLowerCase();\n\nif (severity === \"critical\") score += 20;\nelse if (severity === \"high\") score += 15;\nelse if (severity === \"medium\") score += 10;\nelse if (severity === \"low\") score += 5;\n\n// 4. Threat intelligence risk level (0–15)\nconst tiRisk = (data.ti_risk_level || \"\").toLowerCase();\n\nif (tiRisk === \"critical\") score += 15;\nelse if (tiRisk === \"high\") score += 15;\nelse if (tiRisk === \"medium\") score += 10;\nelse if (tiRisk === \"low\") score += 5;\n\n// Clamp score\nscore = Math.min(Math.round(score), 100);\n\n// Determine risk level\nlet riskLevel = \"LOW\";\n\nif (score >= 75) riskLevel = \"CRITICAL\";\nelse if (score >= 50) riskLevel = \"HIGH\";\nelse if (score >= 25) riskLevel = \"MEDIUM\";\n\n// ✅ Preserve ALL previous fields properly\nreturn [\n  {\n    json: {\n      ...data,\n      risk_score: score,\n      risk_level: riskLevel,\n    }\n  }\n];"
+        "jsCode": "const data = $input.first().json;\n\n// Initialize score\nlet score = 0;\n\n// 1. AbuseIPDB score contribution (0\u201340)\nconst abuseScore = data.ip_reputation_score || 0;\nscore += Math.min(abuseScore * 0.4, 40);\n\n// 2. Indicator count contribution (0\u201325)\nconst ipCount = data.extracted_indicators?.ip_addresses?.length || 0;\nconst hashCount = data.extracted_indicators?.sha256_hashes?.length || 0;\n\nconst indicatorScore = (ipCount * 5) + (hashCount * 8);\nscore += Math.min(indicatorScore, 25);\n\n// 3. Severity contribution (0\u201320)\nconst severity = (data.severity || \"\").toLowerCase();\n\nif (severity === \"critical\") score += 20;\nelse if (severity === \"high\") score += 15;\nelse if (severity === \"medium\") score += 10;\nelse if (severity === \"low\") score += 5;\n\n// 4. Threat intelligence risk level (0\u201315)\nconst tiRisk = (data.ti_risk_level || \"\").toLowerCase();\n\nif (tiRisk === \"critical\") score += 15;\nelse if (tiRisk === \"high\") score += 15;\nelse if (tiRisk === \"medium\") score += 10;\nelse if (tiRisk === \"low\") score += 5;\n\n// Clamp score\nscore = Math.min(Math.round(score), 100);\n\n// Determine risk level\nlet riskLevel = \"LOW\";\n\nif (score >= 75) riskLevel = \"CRITICAL\";\nelse if (score >= 50) riskLevel = \"HIGH\";\nelse if (score >= 25) riskLevel = \"MEDIUM\";\n\n// \u2705 Preserve ALL previous fields properly\nreturn [\n  {\n    json: {\n      ...data,\n      risk_score: score,\n      risk_level: riskLevel,\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
       "typeVersion": 2,
@@ -373,7 +367,9 @@
     {
       "parameters": {
         "url": "http://host.docker.internal:8000/get_latest_document_content",
-        "options": {}
+        "options": {},
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
@@ -382,7 +378,13 @@
         896
       ],
       "id": "18554314-efbf-4c28-bb4c-d7c5fc8e8d57",
-      "name": "GET logs"
+      "name": "GET logs",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "aipcc-api-key",
+          "name": "AIPCC API Key"
+        }
+      }
     },
     {
       "parameters": {
@@ -424,7 +426,7 @@
         ]
       ]
     },
-    "LLM – Groq Inference": {
+    "LLM \u2013 Groq Inference": {
       "ai_languageModel": [
         [
           {

@@ -7,6 +7,7 @@ only their own reports; an admin sees everything.
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -17,6 +18,7 @@ from app.db import models
 from app.db.session import get_db
 from app.schemas.report import (
     GenerateReportRequest,
+    IntegrityUpdate,
     ReportDetail,
     ReportStatusResponse,
     ReportSummary,
@@ -92,8 +94,41 @@ def store_generated_report(
         report_name=request.report_name,
         classification=request.classification,
         sections=request.sections,
+        threat_intel=request.threat_intel,
     )
     return load_report_detail(db, report)
+
+
+@router.patch("/api/report/integrity/{report_id}", response_model=ReportStatusResponse)
+def update_report_integrity(
+    report_id: uuid.UUID,
+    request: IntegrityUpdate,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReportStatusResponse:
+    """Record the FIM engine's verdict on a report's source document.
+
+    The path is the one the exported workflow already calls. `integrity_state`
+    is a closed enum, so a workflow that sends a typo gets a 422 rather than
+    writing a state the UI has no rendering for.
+
+    `integrity_checked_at` is stamped here rather than taken from the request:
+    "when was this last verified" is a claim about this system, and letting a
+    caller set it would let a stale check present itself as a fresh one.
+    """
+    report = _get_authorized_report(db, user, report_id)
+    report.integrity_state = request.integrity_state
+    report.integrity_checked_at = datetime.now(timezone.utc)
+    if request.observed_hash and request.integrity_state == "TAMPERED":
+        # Keep the evidence with the verdict. The sealed hash stays in
+        # `file_hash`; this is what the file hashes to now.
+        report.error_detail = (
+            f"integrity mismatch: sealed {report.file_hash or 'unknown'}, "
+            f"observed {request.observed_hash}"
+        )
+    db.commit()
+    db.refresh(report)
+    return ReportStatusResponse.model_validate(report)
 
 
 @router.get("/reports", response_model=list[ReportSummary])

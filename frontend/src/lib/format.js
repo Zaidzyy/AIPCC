@@ -129,6 +129,50 @@ export function statusToken(status) {
   return STATUS_TOKENS[key] ?? { label: status || "Unknown", text: "text-info", dot: "bg-info" };
 }
 
+// --- File integrity -------------------------------------------------------
+
+/**
+ * The FIM engine's verdict on a report's source document.
+ *
+ * UNKNOWN is grey on purpose. "Nobody has checked this" is not a mild version
+ * of "this is fine" — it is the absence of a check — and colouring it green
+ * would tell an analyst something no one has verified. Every class name is
+ * written out in full; see the note on `SEVERITY_TOKENS`.
+ */
+const INTEGRITY_TOKENS = {
+  SEALED: {
+    key: "SEALED",
+    label: "Sealed",
+    description: "The source log still matches the hash recorded when this report was generated.",
+    text: "text-ok",
+    dot: "bg-ok",
+    tint: "bg-ok/10",
+    border: "border-ok/35",
+  },
+  TAMPERED: {
+    key: "TAMPERED",
+    label: "Tampered",
+    description: "The source log no longer matches the hash recorded when this report was generated.",
+    text: "text-critical",
+    dot: "bg-critical",
+    tint: "bg-critical/10",
+    border: "border-critical/35",
+  },
+  UNKNOWN: {
+    key: "UNKNOWN",
+    label: "Unverified",
+    description: "The integrity of the source log has not been checked yet.",
+    text: "text-ink-dim",
+    dot: "bg-ink-faint",
+    tint: "bg-raised",
+    border: "border-line-strong",
+  },
+};
+
+export function integrityToken(state) {
+  return INTEGRITY_TOKENS[String(state ?? "").toUpperCase()] ?? INTEGRITY_TOKENS.UNKNOWN;
+}
+
 // --- Primitives -----------------------------------------------------------
 
 export function formatBytes(bytes) {

@@ -1,6 +1,6 @@
 import { cva } from "class-variance-authority";
 
-import { severityToken, statusToken } from "@/lib/format";
+import { integrityToken, severityToken, statusToken } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const badgeVariants = cva(
@@ -41,6 +41,33 @@ export function SeverityBadge({ level, className }) {
       )}
     >
       <span className={cn("size-1.5 rounded-full", token.bg)} aria-hidden="true" />
+      {token.label}
+    </span>
+  );
+}
+
+/**
+ * File-integrity state, from the n8n FIM engine.
+ *
+ * Bordered rather than bare, because unlike report status this is a claim
+ * about evidence — a tampered source log is the strongest thing this screen
+ * can say, and it should not read as a status word.
+ */
+export function IntegrityBadge({ state, className }) {
+  const token = integrityToken(state);
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-sm border px-1.5 py-0.5",
+        "font-mono text-[0.6875rem] font-medium uppercase tracking-wider whitespace-nowrap",
+        token.tint,
+        token.border,
+        token.text,
+        className,
+      )}
+      title={token.description}
+    >
+      <span className={cn("size-1.5 rounded-full", token.dot)} aria-hidden="true" />
       {token.label}
     </span>
   );

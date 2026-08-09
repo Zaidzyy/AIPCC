@@ -196,6 +196,51 @@ class ReportGenerationResult(BaseModel):
         return bool(self.errors)
 
 
+# --- Threat intelligence --------------------------------------------------
+
+# Same three states the FIM workflow works in. UNKNOWN is the honest default:
+# a report nobody has checked is not "fine", it is unchecked.
+IntegrityState = Literal["UNKNOWN", "SEALED", "TAMPERED"]
+
+
+class ThreatIntelCreate(BaseModel):
+    """One enriched indicator, as the n8n orchestrator produces it.
+
+    Field names match `models.ThreatIntel` columns exactly, so storage is
+    `ThreatIntel(**item.model_dump())` — the same no-mapping rule the report
+    sections follow.
+    """
+
+    model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    indicator: str = Field(min_length=1, max_length=500)
+    indicator_type: str = Field(max_length=50)
+    category: str | None = Field(default=None, max_length=120)
+    source: str = Field(default="n8n", max_length=50)
+    reputation_score: Count = None
+    risk_level: Text = None
+    country: str | None = Field(default=None, max_length=10)
+    usage_type: str | None = Field(default=None, max_length=120)
+    raw: dict | None = None
+
+
+class ThreatIntelItem(ThreatIntelCreate):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    created_at: datetime | None = None
+
+
+class IntegrityUpdate(BaseModel):
+    """Body of PATCH /api/report/integrity/{report_id}, sent by the FIM engine."""
+
+    integrity_state: IntegrityState
+    # The hash the engine actually computed. Optional, but when it is supplied
+    # a TAMPERED verdict carries the evidence for itself instead of asking an
+    # analyst to take the workflow's word for it.
+    observed_hash: str | None = Field(default=None, max_length=64)
+
+
 # --- API request / response ----------------------------------------------
 
 
@@ -212,6 +257,8 @@ class ReportStatusResponse(BaseModel):
     status: str
     error_detail: str | None = None
     generated_at: datetime | None = None
+    integrity_state: IntegrityState = "UNKNOWN"
+    integrity_checked_at: datetime | None = None
 
 
 class ReportSummary(BaseModel):
@@ -224,11 +271,16 @@ class ReportSummary(BaseModel):
     classification: str
     status: str
     generated_at: datetime | None = None
+    integrity_state: IntegrityState = "UNKNOWN"
+    integrity_checked_at: datetime | None = None
 
 
 class ReportDetail(ReportSummary):
     sections: ReportSections
     errors: list[SectionError] = Field(default_factory=list)
+    # The source document's SHA-256 as it was when this report was generated.
+    file_hash: str | None = None
+    threat_intel: list[ThreatIntelItem] = Field(default_factory=list)
 
 
 class StoreGeneratedReportRequest(BaseModel):
@@ -245,6 +297,9 @@ class StoreGeneratedReportRequest(BaseModel):
     report_name: str = Field(min_length=1, max_length=255)
     classification: str = "Internal"
     sections: ReportSections
+    # The orchestrator's AbuseIPDB reputation and IOC classification pass.
+    # Optional: a report generated without enrichment is still a valid report.
+    threat_intel: list[ThreatIntelCreate] = Field(default_factory=list)
 
 
 # --- Prompt helpers -------------------------------------------------------

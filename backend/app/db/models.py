@@ -73,6 +73,9 @@ class Users(Base):
     chats: Mapped[list[Chat]] = relationship(
         back_populates="user", cascade="all, delete-orphan"
     )
+    api_keys: Mapped[list[ApiKey]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
 
 
 class Document(Base):
@@ -118,6 +121,18 @@ class Report(Base):
     # Why a report is partial or failed — surfaced by GET /reports/{id}/status.
     error_detail: Mapped[str | None] = mapped_column(Text)
 
+    # --- File integrity (Phase 5) ---------------------------------------
+    # The SHA-256 of the source document *as it was when this report was
+    # generated*. It lives on the report, not the document: a report is a
+    # statement about a file at a point in time, and re-hashing the document
+    # row would only ever tell you what the file is now.
+    file_hash: Mapped[str | None] = mapped_column(String(64))
+    # UNKNOWN — never checked | SEALED — matches | TAMPERED — does not.
+    integrity_state: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+    )
+    integrity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
     user: Mapped[Users] = relationship(back_populates="reports")
     document: Mapped[Document] = relationship(back_populates="reports")
     attack_types: Mapped[list[AttackType]] = relationship(
@@ -133,6 +148,12 @@ class Report(Base):
         back_populates="report", cascade="all, delete-orphan"
     )
     timeline: Mapped[list[Timeline]] = relationship(
+        back_populates="report", cascade="all, delete-orphan"
+    )
+    threat_intel: Mapped[list[ThreatIntel]] = relationship(
+        back_populates="report", cascade="all, delete-orphan"
+    )
+    alerts: Mapped[list[SecurityAlert]] = relationship(
         back_populates="report", cascade="all, delete-orphan"
     )
 
@@ -232,6 +253,108 @@ class Timeline(Base):
     duration: Mapped[str | None] = mapped_column(String(100))
 
     report: Mapped[Report] = relationship(back_populates="timeline")
+
+
+class ThreatIntel(Base):
+    """Enrichment for one indicator observed in a report's source log.
+
+    Produced by the n8n orchestrator (AbuseIPDB reputation, its IOC
+    classification pass) and persisted alongside the report so the Report
+    Detail page can show where an indicator's score came from. The raw provider
+    response is kept in `raw` — a score without its evidence is not something
+    an analyst can act on.
+    """
+
+    __tablename__ = "threat_intel"
+
+    id: Mapped[uuid.UUID] = _pk()
+    report_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reports.report_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    indicator: Mapped[str] = mapped_column(String(500), nullable=False)
+    # ip | hash | domain — what kind of thing `indicator` is.
+    indicator_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    # The workflow's own classification, e.g. "External Infrastructure".
+    category: Mapped[str | None] = mapped_column(String(120))
+    # abuseipdb | virustotal | n8n
+    source: Mapped[str] = mapped_column(String(50), nullable=False, default="n8n")
+    # AbuseIPDB's 0–100 confidence, or an equivalent from another provider.
+    reputation_score: Mapped[int | None] = mapped_column(Integer)
+    risk_level: Mapped[str | None] = mapped_column(String(50))
+    country: Mapped[str | None] = mapped_column(String(10))
+    usage_type: Mapped[str | None] = mapped_column(String(120))
+    raw: Mapped[dict | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    report: Mapped[Report] = relationship(back_populates="threat_intel")
+
+
+class SecurityAlert(Base):
+    """Something a workflow or the app wants an analyst to look at.
+
+    `user_id` is who the alert belongs to — the owner of the report it concerns
+    — so alerts scope exactly like reports do. `source` is which workflow or
+    subsystem raised it, because "who is telling me this" is the first question
+    an analyst asks about an alert they did not expect.
+    """
+
+    __tablename__ = "security_alerts"
+
+    alert_id: Mapped[uuid.UUID] = _pk()
+    severity: Mapped[str] = mapped_column(String(50), nullable=False, default="medium")
+    source: Mapped[str] = mapped_column(String(120), nullable=False)
+    message: Mapped[str] = mapped_column(Text, nullable=False)
+    # open | resolved. The dashboard's "open alerts" count reads this.
+    status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="open", server_default="open"
+    )
+    report_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("reports.report_id", ondelete="CASCADE"), index=True
+    )
+    document_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("documents.document_id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    report: Mapped[Report | None] = relationship(back_populates="alerts")
+
+
+class ApiKey(Base):
+    """A long-lived credential for a machine caller — see `core/api_key.py`.
+
+    Only the SHA-256 of the secret is stored; `prefix` is the clear, uniquely
+    indexed lookup component so verification never scans the table.
+    """
+
+    __tablename__ = "api_keys"
+
+    key_id: Mapped[uuid.UUID] = _pk()
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    prefix: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    key_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Null means "does not expire" — which is the point for a scheduled
+    # workflow. Revocation, not expiry, is how such a key is retired.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+
+    user: Mapped[Users] = relationship(back_populates="api_keys")
 
 
 class Chat(Base):

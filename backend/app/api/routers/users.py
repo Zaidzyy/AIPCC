@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_admin
+from app.api.deps import require_human_admin
 from app.core.security import hash_password
 from app.db import models
 from app.db.session import get_db
@@ -24,7 +24,7 @@ router = APIRouter(prefix="/users", tags=["users"])
 
 @router.get("", response_model=list[UserPublic])
 def list_users(
-    _: models.Users = Depends(require_admin),
+    _: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> list[UserPublic]:
     users = db.scalars(select(models.Users).order_by(models.Users.created_at)).all()
@@ -34,7 +34,7 @@ def list_users(
 @router.post("", response_model=UserPublic, status_code=201)
 def create_user(
     payload: AdminUserCreate,
-    _: models.Users = Depends(require_admin),
+    _: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
     existing = db.scalar(
@@ -65,7 +65,7 @@ def create_user(
 @router.get("/{user_id}", response_model=UserPublic)
 def get_user(
     user_id: uuid.UUID,
-    _: models.Users = Depends(require_admin),
+    _: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
     user = db.get(models.Users, user_id)
@@ -78,7 +78,7 @@ def get_user(
 def update_role(
     user_id: uuid.UUID,
     payload: UserRoleUpdate,
-    admin: models.Users = Depends(require_admin),
+    admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
     user = _get_or_404(db, user_id)
@@ -97,7 +97,7 @@ def update_role(
 def update_status(
     user_id: uuid.UUID,
     payload: UserStatusUpdate,
-    admin: models.Users = Depends(require_admin),
+    admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
     user = _get_or_404(db, user_id)
@@ -114,7 +114,7 @@ def update_status(
 @router.delete("/{user_id}", status_code=204)
 def delete_user(
     user_id: uuid.UUID,
-    admin: models.Users = Depends(require_admin),
+    admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> None:
     user = _get_or_404(db, user_id)

@@ -1,4 +1,13 @@
-import { Activity, ArrowRight, Database, FileText, ShieldAlert, Sparkles, TriangleAlert } from "lucide-react";
+import {
+  Activity,
+  ArrowRight,
+  BellRing,
+  Database,
+  FileText,
+  ShieldAlert,
+  Sparkles,
+  TriangleAlert,
+} from "lucide-react";
 import { Suspense, lazy, useState } from "react";
 import { Link } from "react-router-dom";
 
@@ -109,7 +118,7 @@ export function Dashboard() {
           behind the numbers rather than beside them — manifest rules 1 and 2. */}
       <section className="relative mb-6 overflow-hidden rounded-lg border border-line">
         <AmbientVideo clip="threat-globe" opacity="opacity-30" scrim="bg-void/78" />
-        <div className="relative grid gap-px bg-line/60 sm:grid-cols-2 xl:grid-cols-4">
+        <div className="relative grid gap-px bg-line/60 sm:grid-cols-2 xl:grid-cols-5">
           <Stat
             label="Reports"
             value={summary.data?.total_reports}
@@ -129,6 +138,14 @@ export function Dashboard() {
             value={summary.data?.documents_ingested}
             query={summary}
             icon={Database}
+          />
+          <Stat
+            label="Open alerts"
+            value={summary.data?.open_alerts}
+            query={summary}
+            icon={BellRing}
+            tone={summary.data?.open_alerts > 0 ? "high" : undefined}
+            hint="Raised by the n8n workflows"
           />
           <Stat
             label="Needs attention"
@@ -188,6 +205,7 @@ function attentionTone(summary) {
 function Stat({ label, value, hint, query, icon: Icon, tone }) {
   const toneClass = {
     critical: "text-critical",
+    high: "text-high",
     medium: "text-medium",
     ok: "text-ok",
   }[tone];

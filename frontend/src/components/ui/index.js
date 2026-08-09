@@ -1,5 +1,5 @@
 export { Avatar } from "./avatar";
-export { Badge, SeverityBadge, StatusBadge } from "./badge";
+export { Badge, IntegrityBadge, SeverityBadge, StatusBadge } from "./badge";
 export { Button, buttonVariants } from "./button";
 export {
   Card,

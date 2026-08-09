@@ -30,9 +30,12 @@ from app.schemas.report import (
     ReportSections,
     RiskAssessmentItem,
     SectionError,
+    ThreatIntelCreate,
+    ThreatIntelItem,
     TimelineItem,
     VulnerabilityItem,
 )
+from app.services.integrity import hash_document
 
 # section name -> (ORM model, relationship attribute on Report, schema item)
 SECTION_TABLES: dict[str, tuple[type, str, type]] = {
@@ -65,17 +68,37 @@ def store_report(
     classification: str,
     sections: ReportSections,
     errors: list[SectionError] | None = None,
+    threat_intel: list[ThreatIntelCreate] | None = None,
 ) -> models.Report:
-    """Persist a generated report and all its sections. Commits."""
+    """Persist a generated report and all its sections. Commits.
+
+    `user_id` is the caller — who asked for this report. The report is
+    attributed to the **document's owner**, which is usually the same person
+    and deliberately is not always. The n8n orchestrator runs on a service
+    account: attributing to the caller would file every workflow-generated
+    report under `n8n@aipcc.io`, where the analyst whose log it describes could
+    never see it. Since `/reports` is scoped by `user_id`, that is the
+    difference between a feature and a black hole.
+
+    This is not a hardcoded user (hard rule #2). The caller is still resolved
+    from their token and still authorized against the document before reaching
+    here; ownership of the *output* simply follows ownership of the *input*.
+    """
     errors = errors or []
+
+    document = db.get(models.Document, document_id)
 
     report = models.Report(
         report_name=report_name,
         document_id=document_id,
-        user_id=user_id,
+        user_id=document.user_id if document else user_id,
         classification=classification,
         status=resolve_status(sections, errors),
         error_detail=_format_errors(errors),
+        # Seal the source document as it is right now. A missing or unreadable
+        # file leaves this null and the report UNKNOWN rather than failing the
+        # write — an unsealable report is still a report.
+        file_hash=hash_document(document.document_path) if document else None,
     )
     db.add(report)
     # Flush so the primary key exists before children reference it. This is the
@@ -85,6 +108,9 @@ def store_report(
     for section_name, (model_cls, _, _) in SECTION_TABLES.items():
         for item in getattr(sections, section_name):
             db.add(model_cls(report_id=report.report_id, **item.model_dump()))
+
+    for indicator in threat_intel or []:
+        db.add(models.ThreatIntel(report_id=report.report_id, **indicator.model_dump()))
 
     db.commit()
     db.refresh(report)
@@ -113,6 +139,12 @@ def load_report_sections(db: Session, report_id: uuid.UUID) -> ReportSections:
 
 
 def load_report_detail(db: Session, report: models.Report) -> ReportDetail:
+    indicators = db.scalars(
+        select(models.ThreatIntel)
+        .where(models.ThreatIntel.report_id == report.report_id)
+        .order_by(models.ThreatIntel.created_at)
+    ).all()
+
     return ReportDetail(
         report_id=report.report_id,
         report_name=report.report_name,
@@ -121,6 +153,12 @@ def load_report_detail(db: Session, report: models.Report) -> ReportDetail:
         classification=report.classification,
         status=report.status,
         generated_at=report.generated_at,
+        integrity_state=report.integrity_state,
+        integrity_checked_at=report.integrity_checked_at,
+        file_hash=report.file_hash,
         sections=load_report_sections(db, report.report_id),
+        threat_intel=[
+            ThreatIntelItem.model_validate(row, from_attributes=True) for row in indicators
+        ],
         errors=[],
     )

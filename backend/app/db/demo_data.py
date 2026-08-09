@@ -31,10 +31,13 @@ from app.db.models import (
     Document,
     Report,
     RiskAssessment,
+    SecurityAlert,
+    ThreatIntel,
     Timeline,
     Users,
     Vulnerability,
 )
+from app.services.integrity import hash_document
 
 # Fixed so the fixture is reproducible. Any constant would do; this is the date
 # the demo set was written.
@@ -450,6 +453,27 @@ TIMELINE_EVENTS = [
 
 CLASSIFICATIONS = ["Internal", "Confidential", "Restricted"]
 
+# Enrichment the n8n orchestrator would have produced: AbuseIPDB reputation for
+# the IPs its indicator-extraction pass found, plus its own IOC classification.
+INDICATORS = [
+    ("203.0.113.44", "ip", "External Infrastructure", "abuseipdb", 94, "CRITICAL", "RU", "Data Center/Web Hosting"),
+    ("198.51.100.23", "ip", "External Infrastructure", "abuseipdb", 71, "HIGH", "NL", "Data Center/Web Hosting"),
+    ("192.0.2.17", "ip", "External Infrastructure", "abuseipdb", 38, "MEDIUM", "US", "Commercial"),
+    ("10.14.2.37", "ip", "Internal Infrastructure", "abuseipdb", 0, "LOW", "-", "Reserved"),
+    ("203.0.113.90", "ip", "External Infrastructure", "abuseipdb", 82, "HIGH", "CN", "Data Center/Web Hosting"),
+    ("cdn-metrics-eu.example", "domain", "Network Indicator", "n8n", None, "MEDIUM", None, None),
+    ("update-svc.example", "domain", "Network Indicator", "n8n", None, "HIGH", None, None),
+    ("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855", "hash", "Malware Artifact", "virustotal", 46, "CRITICAL", None, None),
+    ("9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08", "hash", "Malware Artifact", "virustotal", 3, "LOW", None, None),
+]
+
+ALERT_TEMPLATES = [
+    ("critical", "FIM & Audit Engine", "File integrity mismatch on the source log for {report}. The file no longer matches the hash recorded when the report was generated."),
+    ("high", "FIM & Audit Engine", "VirusTotal flagged the source artifact for {report} as malicious across 46 engines."),
+    ("medium", "AI Security Report Orchestrator", "Threat intelligence raised the risk score for {report} above the alerting threshold."),
+    ("low", "AI Security Report Orchestrator", "Report {report} completed with one section missing; enrichment ran on partial data."),
+]
+
 REPORT_TITLES = [
     "Perimeter log review",
     "VPN authentication audit",
@@ -574,6 +598,13 @@ def _seed_report(
     elif status == "failed":
         error_detail = "provider unreachable: connection reset while generating sections"
 
+    # Most reports have been audited and match; a few have never been checked;
+    # one in twelve is TAMPERED, which is what makes the badge worth having.
+    integrity_roll = rng.random()
+    integrity_state = (
+        "SEALED" if integrity_roll < 0.72 else "UNKNOWN" if integrity_roll < 0.92 else "TAMPERED"
+    )
+
     report = Report(
         report_name=f"{title} — {document.document_name}",
         document_id=document.document_id,
@@ -582,9 +613,26 @@ def _seed_report(
         classification=rng.choice(CLASSIFICATIONS),
         status=status,
         error_detail=error_detail,
+        file_hash=hash_document(document.document_path),
+        integrity_state=integrity_state,
+        integrity_checked_at=(
+            generated_at + timedelta(hours=rng.randint(1, 36))
+            if integrity_state != "UNKNOWN"
+            else None
+        ),
     )
     db.add(report)
     db.flush()
+
+    if integrity_state == "TAMPERED":
+        severity, source, template = ALERT_TEMPLATES[0]
+        _add_alert(db, report, owner, severity, source, template, generated_at, rng, resolved=False)
+    elif rng.random() < 0.18:
+        severity, source, template = rng.choice(ALERT_TEMPLATES[1:])
+        _add_alert(
+            db, report, owner, severity, source, template, generated_at, rng,
+            resolved=rng.random() < 0.55,
+        )
 
     if status == "failed":
         # A failed report has no sections. Giving it findings anyway would make
@@ -638,4 +686,42 @@ def _seed_report(
         )
         findings += 1
 
+    # Not every report is enriched — the orchestrator runs threat intel, the
+    # in-app generator does not, and the Report Detail page has to handle both.
+    if rng.random() < 0.65:
+        for row in rng.sample(INDICATORS, rng.randint(2, 5)):
+            indicator, kind, category, source, score, level, country, usage = row
+            db.add(
+                ThreatIntel(
+                    report_id=report.report_id,
+                    indicator=indicator,
+                    indicator_type=kind,
+                    category=category,
+                    source=source,
+                    reputation_score=score,
+                    risk_level=level,
+                    country=country,
+                    usage_type=usage,
+                    raw={"abuseConfidenceScore": score} if score is not None else None,
+                )
+            )
+            findings += 1
+
     return findings
+
+
+def _add_alert(db, report, owner, severity, source, template, generated_at, rng, *, resolved):
+    raised = generated_at + timedelta(hours=rng.randint(1, 30))
+    db.add(
+        SecurityAlert(
+            severity=severity,
+            source=source,
+            message=template.format(report=report.report_name),
+            status="resolved" if resolved else "open",
+            report_id=report.report_id,
+            document_id=report.document_id,
+            user_id=owner.user_id,
+            created_at=raised,
+            resolved_at=raised + timedelta(hours=rng.randint(1, 20)) if resolved else None,
+        )
+    )

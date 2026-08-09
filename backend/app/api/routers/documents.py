@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -19,6 +20,7 @@ from app.core.config import settings
 from app.db import models
 from app.db.session import get_db
 from app.schemas.document import DocumentDetail, DocumentSummary, LatestDocumentContent
+from app.services.integrity import IntegrityError, resolve_upload_path
 from app.services.rag.ingest import SUPPORTED_EXTENSIONS, ingest
 
 router = APIRouter(tags=["documents"])
@@ -135,6 +137,71 @@ def get_latest_document_content(
         uploaded_at=document.uploaded_at,
         truncated=truncated,
         content=content[:max_chars],
+    )
+
+
+@router.get("/documents/{document_id}/download")
+def download_document(
+    document_id: uuid.UUID,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Serve a document's bytes. Used by the n8n FIM engine to re-hash it.
+
+    Selecting by id means no part of the path comes from the request. The
+    stored path is still validated against the upload directory before it is
+    opened, because a row is untrusted input too.
+    """
+    document = db.get(models.Document, document_id)
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"document {document_id} not found")
+    authorize_owner(user, document.user_id)
+    return _serve(document)
+
+
+@router.get("/uploads/{document_name}")
+def download_upload_by_name(
+    document_name: str,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> FileResponse:
+    """Serve a document by its original file name.
+
+    The FIM workflow knows documents by name, not id. The name is used only as
+    a **database lookup key** — it is never joined onto a directory, because
+    "../../.env" is a perfectly valid file name and `upload_dir / name` would
+    happily open it. The caller selects a row; the row supplies the path.
+
+    Names are not unique (two analysts may both upload "auth.log"), so this
+    resolves within the caller's own documents and returns the most recent
+    match. An admin, who can see everything, gets the most recent overall.
+    """
+    statement = (
+        select(models.Document)
+        .where(models.Document.document_name == document_name)
+        .order_by(models.Document.uploaded_at.desc())
+    )
+    if not is_admin(user):
+        statement = statement.where(models.Document.user_id == user.user_id)
+
+    document = db.scalars(statement.limit(1)).first()
+    if document is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "document not found")
+    return _serve(document)
+
+
+def _serve(document: models.Document) -> FileResponse:
+    try:
+        path = resolve_upload_path(document.document_path)
+    except IntegrityError as exc:
+        # 410, not 404: the record exists, the bytes do not. Those are
+        # different problems and the FIM engine handles them differently.
+        raise HTTPException(status.HTTP_410_GONE, str(exc)) from exc
+
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=document.document_name,
     )
 
 

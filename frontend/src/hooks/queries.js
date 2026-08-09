@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { chatApi, dashboardApi, documentsApi, reportsApi, usersApi } from "@/lib/api";
+import {
+  alertsApi,
+  chatApi,
+  dashboardApi,
+  documentsApi,
+  reportsApi,
+  usersApi,
+} from "@/lib/api";
 
 /**
  * Every server interaction in the app.
@@ -24,7 +31,38 @@ export const keys = {
   dashboardSeverity: ["dashboard", "severity"],
   dashboardAttacks: (limit) => ["dashboard", "top-attack-types", limit],
   dashboardAnomalies: (days) => ["dashboard", "anomalies-over-time", days],
+  alerts: ["alerts"],
+  alertList: (status) => ["alerts", status ?? "all"],
 };
+
+// --- Alerts ---------------------------------------------------------------
+
+export function useAlerts(status) {
+  return useQuery({
+    queryKey: keys.alertList(status),
+    queryFn: () => alertsApi.list(status),
+  });
+}
+
+function useAlertMutation(mutationFn) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.alerts });
+      // The KPI row counts open alerts, so resolving one changes the dashboard.
+      queryClient.invalidateQueries({ queryKey: keys.dashboard });
+    },
+  });
+}
+
+export function useSetAlertStatus() {
+  return useAlertMutation(({ alertId, status }) => alertsApi.setStatus(alertId, status));
+}
+
+export function useDeleteAlert() {
+  return useAlertMutation(alertsApi.remove);
+}
 
 // --- Dashboard ------------------------------------------------------------
 

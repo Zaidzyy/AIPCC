@@ -144,6 +144,7 @@ def test_summary_of_a_new_account_is_all_zeros(api, analyst_auth):
         "critical_findings": 0,
         "documents_ingested": 0,
         "attention_required": 0,
+        "open_alerts": 0,
     }
 
 

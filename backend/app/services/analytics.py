@@ -93,12 +93,7 @@ def _as_date(value: datetime | date) -> date:
 
 
 def kpi_summary(db: Session, user: models.Users) -> KpiSummary:
-    """The four headline numbers.
-
-    `open_alerts` is deliberately absent: there is no alerts table until
-    Phase 5, and a KPI tile showing a hardcoded zero would be a lie in the
-    shape of a feature. `attention_required` is a real number today.
-    """
+    """The five headline numbers."""
     reports = _scope(
         select(func.count(models.Report.report_id)), user, models.Report.user_id
     )
@@ -112,11 +107,19 @@ def kpi_summary(db: Session, user: models.Users) -> KpiSummary:
         user,
         models.Report.user_id,
     )
+    open_alerts = _scope(
+        select(func.count(models.SecurityAlert.alert_id)).where(
+            models.SecurityAlert.status == "open"
+        ),
+        user,
+        models.SecurityAlert.user_id,
+    )
 
     return KpiSummary(
         total_reports=db.scalar(reports) or 0,
         documents_ingested=db.scalar(documents) or 0,
         attention_required=db.scalar(attention) or 0,
+        open_alerts=db.scalar(open_alerts) or 0,
         critical_findings=_critical_findings(db, user),
     )
 

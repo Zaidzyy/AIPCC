@@ -33,7 +33,7 @@ seed credentials, and see a populated app.
 | LLM | Provider abstraction — Gemini (default), Ollama (local), Groq. Set `LLM_PROVIDER`. |
 | Frontend | React 19 + Vite, react-router-dom, Tailwind, TanStack Query |
 | Automation | n8n (report orchestrator + file-integrity engine) |
-| Auth | OAuth2 password flow, bcrypt, JWT |
+| Auth | OAuth2 password flow, bcrypt, JWT for humans; revocable API keys for machines |
 
 ---
 
@@ -46,21 +46,22 @@ backend/
     core/
       config.py             # pydantic-settings — ALL env access happens here
       security.py           # bcrypt hashing, JWT create/verify, auth dependencies
+      api_key.py            # long-lived machine credentials (SHA-256, not bcrypt)
     db/
       session.py            # engine + session factory (NEVER drop/create on import)
       models.py             # SQLAlchemy models
       seed.py               # explicit seed script, run manually
       demo_data.py          # deterministic --demo fixtures (fixed seed, no LLM)
     schemas/                # Pydantic: API request/response + LLM output schemas
-    api/routers/            # auth, users, documents, reports, chat, dashboard, integrations
+    api/routers/            # auth, users, documents, reports, chat, dashboard,
+                            #   alerts, api_keys
     services/
       rag/                  # ingest, chunk, embed  (ported from prototype)
       llm/                  # LLMProvider abstraction + implementations
       report.py             # parallel section generation, validation, retry
       analytics.py          # dashboard aggregation — GROUP BY in SQL, never ORM loops
       chatbot.py            # chat over ingested docs
-      threat_intel.py       # AbuseIPDB / VirusTotal enrichment
-      integrity.py          # FIM hash storage + comparison
+      integrity.py          # SHA-256 sealing + safe upload-path resolution
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -74,7 +75,7 @@ frontend/
     components/ui/          # design system primitives (Radix behaviour, own styling)
     components/layout/      # AppShell, Sidebar, Topbar
     components/common/      # PageHeader, SeveritySpine, AmbientVideo, IntroSequence
-    components/report/      # the five report section renderers
+    components/report/      # the five report section renderers + ThreatIntel
     context/AuthContext.jsx # token + current user; the only source of "who am I"
     hooks/queries.js        # every TanStack Query hook and its query keys
     routes/                 # ProtectedRoute, AdminRoute
@@ -102,6 +103,7 @@ alembic upgrade head               # apply migrations
 alembic revision --autogenerate -m "msg"
 python -m app.db.seed              # seed demo data (never automatic)
 python -m app.db.seed --demo       # + six weeks of deterministic demo reports
+python -m app.db.seed --service-token  # + an API key for the n8n workflows (shown once)
 python -m app.db.seed --reset --demo   # wipe seeded users first, then re-seed
 pytest
 
@@ -167,7 +169,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–4 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–5 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
@@ -178,16 +180,23 @@ the document/report endpoints n8n calls, OAuth2 password-flow auth with bcrypt, 
 role-gated, ownership-scoped endpoints, a persisted RAG chat over ingested documents, the
 full React SPA — nine routes behind a single app shell, a Radix-based design system, and every
 server read going through TanStack Query — **and five `/dashboard` aggregation endpoints backed by
-SQL `GROUP BY`, four Recharts views bound to them, and a `--demo` seed that populates them.**
-177 backend tests pass; `npm run lint` is clean.
+SQL `GROUP BY`, four Recharts views bound to them, and a `--demo` seed that populates them,
+**and the full n8n integration — revocable API keys for machine callers, SHA-256 file-integrity
+sealing with the four endpoints the FIM engine needs, a security-alerts table with its own view,
+threat-intel enrichment persisted alongside reports, and both workflow JSONs corrected to call
+the real endpoints with auth attached.** 231 backend tests pass; `npm run lint` is clean.
 
-Not yet built: n8n wiring (Phase 5), export (6), polish (7).
+Not yet built: export (Phase 6), polish (7). The n8n workflow JSONs are corrected and their
+endpoint contracts are covered by tests and verified against a running backend with a real service
+key, but the workflows themselves have not been executed inside n8n — that needs live Groq,
+AbuseIPDB and VirusTotal credentials. See `n8n/IMPORT.md` > Verification status.
 
 Seed credentials: `admin@aipcc.io` / `admin` (`python -m app.db.seed`).
 Add `--ingest` to embed the sample CSV — without it the document is registered but has no chunks,
 and report generation fails with "no indexed content for document …".
 Add `--demo` for a populated dashboard; it also creates `analyst@aipcc.io` / `analyst`, whose
 smaller numbers on the same page are the ownership scoping working.
+Add `--service-token` for the n8n API key (printed once).
 
 ### Decisions taken in Phase 0
 
@@ -340,14 +349,86 @@ smaller numbers on the same page are the ownership scoping working.
   query still sees every pre-existing row in the developer's database, so `== 2` is only correct on
   an empty machine.
 
-### n8n workflows
+### Decisions taken in Phase 5
 
-Recovered and committed to `n8n/` — see `n8n/IMPORT.md`. They were never in the prototype repo; they
-came from a live n8n instance. Phase 1 built the three endpoints the Orchestrator needs. The FIM
-engine still needs four endpoints that arrive in Phase 5 (`/uploads/{name}`,
-`/documents/{id}/download`, `PATCH /api/report/integrity/{id}`, `POST /api/security/alert`).
+**Authentication for machines** — decided first, because everything else depended on it:
+
+- **A separate credential type, not a longer JWT.** Access tokens expire in 60 minutes, which cannot
+  work for a scheduled workflow; raising that lifetime would weaken every human session to suit a
+  machine. So n8n gets a revocable API key (`core/api_key.py`) presented in the same
+  `Authorization: Bearer` header. The two are told apart by the `aipcc_` prefix, which a JWT can
+  never have, so no client code changed.
+- **API keys are hashed with SHA-256, not bcrypt.** This is not a relaxation of hard rule #3.
+  Bcrypt is slow because a *password* is low-entropy and guessable offline; a key here is 32 bytes
+  from `secrets.token_bytes`, so a slow hash buys nothing and costs ~100 ms per request. The
+  clear `prefix` is uniquely indexed, so verification is one indexed lookup plus one constant-time
+  compare — never a scan that hashes every row.
+- **`require_human` refuses API keys on `/users` and `/api-keys`.** A key lives in a credential
+  store and is long-lived by design; if one leaks it must not be able to mint a second credential
+  or create an admin. It can do the workflow's job and nothing beyond it. This is what makes an
+  admin-role service account acceptable — and the FIM engine needs admin, because
+  `/get_all_reports` is owner-scoped.
+- **The service account has no login path.** Its password hash is a random value nobody holds.
+
+**File integrity:**
+
+- **The hash lives on the report, not the document.** A report is a statement about a file at a
+  point in time. Re-hashing the document row later would only ever say what the file is *now* —
+  which is the question the FIM engine exists to answer differently.
+- **`UNKNOWN` is the honest default and renders grey.** "Nobody has checked this" is the absence of
+  a check, not a mild version of "fine", and colouring it green would assert something unverified.
+- **A caller-supplied file name is a database key, never a path.** `/uploads/{document_name}`
+  resolves the name against the `documents` table and serves *that row's* stored path;
+  `settings.upload_dir / name` would happily open `../../.env`. The stored path is then still
+  checked to resolve inside the upload directory, because a row written by older code is untrusted
+  input too.
+- **Missing bytes are 410, not 404.** The record exists and the file does not; those are different
+  problems and the FIM engine handles them differently.
+- **A report with no sealed hash is skipped, not failed.** Comparing against a null hash would mark
+  every unsealable report TAMPERED — a false accusation, not a finding. The workflow filters first.
+
+**Ownership and attribution:**
+
+- **A report belongs to the owner of the document it analyses, not to the caller.** Found while
+  testing the service key end to end: `/reports` is owner-scoped, so attributing to the caller filed
+  every workflow-generated report under `n8n@aipcc.io`, where the analyst whose log it described
+  could never see it. Resolved inside `store_report`, so both write paths share one rule. Not a
+  hard-rule #2 violation: the caller is still resolved from their token and still authorized against
+  the document — ownership of the *output* simply follows ownership of the *input*.
+- **Alerts follow the same rule**, for the same reason.
+- **Severity on an alert is normalised on the way in, and never rejected.** "CRITICAL", "Sev 1" and
+  "critical" are one bucket; anything unrecognisable becomes `medium`. Losing an alert because its
+  severity was spelled oddly is worse than filing it one notch off.
+
+**`open_alerts` is now a real KPI**, replacing the Phase 4 note explaining why it was absent.
+
+### n8n workflows — which system is authoritative
+
+**n8n orchestrates; the backend decides.** The Orchestrator duplicates
+`services/report.py`, and they are not peers: the **Python generator is authoritative**. It owns the
+canonical schema, validation, the repair retry and the section-error contract. The Orchestrator is a
+*client* of that schema — it produces sections and hands them to `/store_generated_report`, which
+validates them exactly as the Python path does before anything reaches the database.
+
+n8n owns scheduling, third-party enrichment (Groq, AbuseIPDB, VirusTotal) and DOCX rendering: work
+about *when* and *from where*, not about *what is true*. That is why the store endpoint re-validates
+everything and why `integrity_state` is a closed enum. A workflow can be edited by anyone with n8n
+access; the invariants cannot be edited from there at all.
+
+Both JSONs in `n8n/` were corrected in Phase 5 — see `n8n/IMPORT.md` for the full list. The FIM
+graph as exported could not have worked even with auth: it read `$json.report[0].document_name`
+against an API that returns a flat object, downloaded the same file twice, and ran every minute.
 
 Prototype commits `c836a19` and `bd55a3f` added partial `file_hash` / security-alert support that is
-absent from its final tree — `git show` recovers it as Phase 5 reference material.
+absent from its final tree — `git show` recovers it as reference material.
+
+### Bugs found and fixed in Phase 5
+
+- **`token_urlsafe` emits `_`.** `extract_prefix` split the key on every separator, so a secret
+  containing an underscore — roughly two in three — produced four parts, failed the length check and
+  401'd. Fixed with `maxsplit=2`; regression-tested over 200 generated keys.
+- **A stray `</content>` tag** had been sitting at the end of
+  `frontend/src/components/motion/motion.css` since Phase 3, producing a CSS syntax warning on every
+  build. Removed.
 
 **Update this section at the end of every phase.**

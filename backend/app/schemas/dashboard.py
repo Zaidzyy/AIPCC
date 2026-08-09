@@ -15,15 +15,17 @@ from pydantic import BaseModel, Field
 class KpiSummary(BaseModel):
     """The headline row.
 
-    There is no `open_alerts` field. Alerts arrive in Phase 5 with the table
-    that backs them; until then `attention_required` — reports that came back
-    partial or failed — is the number that is actually true.
+    `open_alerts` became a real number in Phase 5, when the table behind it
+    arrived. It counts unresolved `security_alerts` rows — including the ones
+    the FIM engine raises when a report's source document stops matching the
+    hash it was sealed with.
     """
 
     total_reports: int
     critical_findings: int
     documents_ingested: int
     attention_required: int
+    open_alerts: int
 
 
 class ReportBucket(BaseModel):
