@@ -1,0 +1,11 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+chroma_langchain_db/
+uploads/
+
+# tests/ is deliberately NOT excluded: seed.py reads its sample dataset from
+# tests/fixtures/, and keeping the suite in the image lets CI run pytest there.

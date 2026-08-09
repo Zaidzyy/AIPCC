@@ -151,7 +151,39 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-Phase 0 (bootstrap). See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phase 0 (Foundation) — complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
+
+In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
+Alembic initial migration, explicit seed script, the ported RAG pipeline (ingest/chunk/embed/
+vectorstore), `docker-compose.yml` (postgres + backend + frontend + n8n), and the frontend scaffold
+(Vite + React 19 + Router + Tailwind v4 + TanStack Query) with one placeholder route.
+
+Not yet built: auth (Phase 2), report generation (Phase 1), real pages (Phase 3). `services/llm/` and
+`schemas/` are empty packages awaiting Phase 1.
+
+### Decisions taken in Phase 0
+
+- **Table names are lowercase** (`users`, not the prototype's `USER`). `USER` is reserved in Postgres.
+  Column names are unchanged, so ported logic still lines up.
+- **`core/security.py` and `bcrypt` landed early.** `seed.py` creates an admin user, and writing a
+  plaintext password even temporarily would break hard rule #3. Only `hash_password` / `verify_password`
+  so far; JWT and the auth dependencies arrive in Phase 2.
+- **`ingest()` takes `(path, extension, document_id)`**, not a `Document` ORM object. This is what
+  removed the prototype's `from backend.main import *` circular import, and it makes RAG ingestion
+  testable with no database.
+- **`seed.py --ingest` is opt-in.** Default seeding is DB-only; embedding the sample CSV is behind a
+  flag because it triggers the MiniLM download.
+- **Hard rules are enforced by tests**, not convention alone — see
+  `tests/test_foundation.py::TestHardRules`. The scanner masks comments and string literals before
+  matching, so it tests code rather than prose.
+
+### Known gap carried into Phase 5
+
+The three n8n workflow JSONs described in `AIPCC_REBUILD_PLAN.md` §2 **do not exist in the prototype
+repo** and were never committed to it on any branch. `PORTING.md` lists them as portable; there is
+nothing to port. They must be exported from whichever n8n instance holds them, or rebuilt. Related:
+commits `c836a19` and `bd55a3f` in the prototype added `file_hash` / security-alert endpoints that are
+absent from its current tree — recoverable with `git show` as reference material.
 
 **Update this section at the end of every phase.**

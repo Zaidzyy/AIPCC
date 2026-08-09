@@ -1,0 +1,17 @@
+@import "tailwindcss";
+
+/* Dark "security console" base. The design system proper arrives in Phase 3. */
+@theme {
+  --color-console-bg: #0a0e14;
+  --color-console-surface: #121821;
+  --color-console-border: #1f2937;
+  --color-console-text: #e5e7eb;
+  --color-console-muted: #9ca3af;
+  --color-console-accent: #22d3ee;
+}
+
+body {
+  background-color: var(--color-console-bg);
+  color: var(--color-console-text);
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+}

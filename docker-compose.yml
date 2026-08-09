@@ -1,0 +1,88 @@
+# AIPCC local stack. Postgres is the default local database — this project never
+# requires an external/managed DB to run.
+#
+#   docker compose up               # everything
+#   docker compose up -d postgres   # just the DB, for running the backend on the host
+
+# Explicit project name. Without it Compose infers one from the directory and
+# warns, since this path resolves through a symlink.
+name: aipcc
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: aipcc-postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aipcc}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-aipcc}
+      POSTGRES_DB: ${POSTGRES_DB:-aipcc}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Named volume, so data survives `docker compose down` and any restart.
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-aipcc} -d ${POSTGRES_DB:-aipcc}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  backend:
+    build: ./backend
+    container_name: aipcc-backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aipcc}:${POSTGRES_PASSWORD:-aipcc}@postgres:5432/${POSTGRES_DB:-aipcc}
+      CHROMA_DIR: /app/chroma_langchain_db
+      UPLOAD_DIR: /app/uploads
+      CORS_ORIGINS: http://localhost:5173
+      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
+      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      ENVIRONMENT: local
+    ports:
+      - "8000:8000"
+    volumes:
+      # Persist the vector store and uploads across container rebuilds.
+      - chroma_data:/app/chroma_langchain_db
+      - uploads_data:/app/uploads
+    # Migrations run here — never schema creation from application code.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    container_name: aipcc-frontend
+    depends_on:
+      - backend
+    environment:
+      VITE_API_BASE_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    restart: unless-stopped
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: aipcc-n8n
+    environment:
+      N8N_PORT: 5678
+      N8N_SECURE_COOKIE: "false"
+      GENERIC_TIMEZONE: ${TZ:-Asia/Dubai}
+    ports:
+      - "5678:5678"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  chroma_data:
+  uploads_data:
+  n8n_data:

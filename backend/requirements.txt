@@ -1,0 +1,33 @@
+# Regenerated from actual imports (PORTING.md: the prototype's 123-line file
+# carried packages nothing imported). Auth and LLM-provider dependencies are
+# added by the phases that introduce them (2 and 1 respectively).
+
+# --- Web ---
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.32,<1.0
+
+# --- Config ---
+pydantic>=2.9,<3.0
+pydantic-settings>=2.6,<3.0
+
+# --- Security ---
+# Phase 0 uses this only so seed.py never writes a plaintext password.
+# Phase 2 adds the JWT dependencies alongside it.
+bcrypt>=4.2,<6.0
+
+# --- Database ---
+SQLAlchemy>=2.0.36,<3.0
+alembic>=1.14,<2.0
+psycopg[binary]>=3.2,<4.0
+
+# --- RAG ---
+pandas>=2.2,<3.0
+langchain-text-splitters>=0.3,<1.0
+langchain-huggingface>=0.1,<1.0
+langchain-chroma>=0.1.4,<1.0
+sentence-transformers>=3.3,<6.0
+chromadb>=0.5.20,<2.0
+
+# --- Tests ---
+pytest>=8.3,<9.0
+httpx>=0.28,<1.0
