@@ -4,10 +4,15 @@ Run deliberately — never on startup:
 
     python -m app.db.seed              # admin user + sample document row
     python -m app.db.seed --ingest     # also embed the sample CSV into Chroma
+    python -m app.db.seed --demo       # also write six weeks of demo reports
     python -m app.db.seed --reset      # delete seeded rows first, then re-seed
 
 `--ingest` is opt-in because it loads the MiniLM embedding model, which is a
 slow first-run download.
+
+`--demo` is opt-in because it writes a lot of rows. It calls no LLM — every
+value comes from the fixed-seed fixtures in `app.db.demo_data` — and it is what
+makes the dashboard worth looking at on a fresh install.
 
 Assumes the schema already exists (`alembic upgrade head`). This script does
 not create tables.
@@ -33,31 +38,59 @@ from app.db.session import SessionLocal
 # serialized by the API that is supposed to return it.
 ADMIN_EMAIL = "admin@aipcc.io"
 ADMIN_PASSWORD = "admin"  # noqa: S105 — local demo credential, documented in README
+# `--demo` also creates an analyst, so a reviewer can log in as a non-admin and
+# watch the ownership scoping do its job: the same dashboard, smaller numbers.
+ANALYST_EMAIL = "analyst@aipcc.io"
+ANALYST_PASSWORD = "analyst"  # noqa: S105 — local demo credential
 SAMPLE_CSV = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic_pegasus_dataset.csv"
+
+SEEDED_EMAILS = (ADMIN_EMAIL, ANALYST_EMAIL)
+
+
+def _seed_user(db, *, email: str, password: str, role: str, first: str, last: str) -> Users:
+    existing = db.scalar(select(Users).where(Users.email == email))
+    if existing:
+        print(f"{role} user already present: {existing.email} ({existing.user_id})")
+        return existing
+
+    user = Users(
+        first_name=first,
+        last_name=last,
+        email=email,
+        role=role,
+        status="Active",
+        phone_number="+971000000000",
+        password_hash=hash_password(password),
+        organization="AIPCC",
+        location="UAE",
+        bio=f"Seeded {role} account.",
+    )
+    db.add(user)
+    db.flush()
+    print(f"created {role} user: {user.email} / {password} ({user.user_id})")
+    return user
 
 
 def seed_admin(db) -> Users:
-    existing = db.scalar(select(Users).where(Users.email == ADMIN_EMAIL))
-    if existing:
-        print(f"admin user already present: {existing.email} ({existing.user_id})")
-        return existing
-
-    admin = Users(
-        first_name="AIPCC",
-        last_name="Admin",
+    return _seed_user(
+        db,
         email=ADMIN_EMAIL,
+        password=ADMIN_PASSWORD,
         role="admin",
-        status="Active",
-        phone_number="+971000000000",
-        password_hash=hash_password(ADMIN_PASSWORD),
-        organization="AIPCC",
-        location="UAE",
-        bio="Seeded administrator account.",
+        first="AIPCC",
+        last="Admin",
     )
-    db.add(admin)
-    db.flush()
-    print(f"created admin user: {admin.email} / {ADMIN_PASSWORD} ({admin.user_id})")
-    return admin
+
+
+def seed_analyst(db) -> Users:
+    return _seed_user(
+        db,
+        email=ANALYST_EMAIL,
+        password=ANALYST_PASSWORD,
+        role="analyst",
+        first="Demo",
+        last="Analyst",
+    )
 
 
 def seed_sample_document(db, owner: Users) -> Document | None:
@@ -97,11 +130,15 @@ def seed_sample_document(db, owner: Users) -> Document | None:
 
 def reset(db) -> None:
     """Delete seeded rows. Cascades remove dependent documents/reports/chats."""
-    admin = db.scalar(select(Users).where(Users.email == ADMIN_EMAIL))
-    if admin:
-        db.delete(admin)
+    deleted = 0
+    for email in SEEDED_EMAILS:
+        user = db.scalar(select(Users).where(Users.email == email))
+        if user:
+            db.delete(user)
+            deleted += 1
+    if deleted:
         db.flush()
-        print("deleted existing seed data")
+        print(f"deleted existing seed data for {deleted} user(s)")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -110,6 +147,11 @@ def main(argv: list[str] | None = None) -> int:
         "--ingest",
         action="store_true",
         help="also embed the sample CSV into Chroma (downloads the embedding model)",
+    )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="write six weeks of deterministic demo reports so the dashboard is populated",
     )
     parser.add_argument(
         "--reset", action="store_true", help="delete seeded rows before seeding"
@@ -122,6 +164,22 @@ def main(argv: list[str] | None = None) -> int:
 
         admin = seed_admin(db)
         document = seed_sample_document(db, admin)
+
+        if args.demo:
+            # Imported here so a plain seed does not pull in the fixture module.
+            from app.db.demo_data import seed_demo
+
+            analyst = seed_analyst(db)
+            counts = seed_demo(db, [admin, analyst])
+            print(
+                f"demo data: {counts['reports']} reports, {counts['documents']} documents, "
+                f"{counts['findings']} findings across 2 users"
+            )
+            print(
+                "  demo documents are registered but not embedded — generate new "
+                f"reports from {SAMPLE_CSV.name} (seeded with --ingest)"
+            )
+
         db.commit()
 
         if args.ingest and document is not None:

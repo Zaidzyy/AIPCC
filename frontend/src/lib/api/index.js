@@ -8,6 +8,7 @@
 
 export * as authApi from "./auth";
 export * as chatApi from "./chat";
+export * as dashboardApi from "./dashboard";
 export * as documentsApi from "./documents";
 export * as reportsApi from "./reports";
 export * as usersApi from "./users";

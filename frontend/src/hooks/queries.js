@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-import { chatApi, documentsApi, reportsApi, usersApi } from "@/lib/api";
+import { chatApi, dashboardApi, documentsApi, reportsApi, usersApi } from "@/lib/api";
 
 /**
  * Every server interaction in the app.
@@ -16,7 +16,46 @@ export const keys = {
   users: ["users"],
   chats: ["chats"],
   chat: (id) => ["chats", id],
+  // The window is part of the key: /dashboard/reports-over-time?days=7 and
+  // ?days=90 are different responses and must not share a cache entry.
+  dashboard: ["dashboard"],
+  dashboardSummary: ["dashboard", "summary"],
+  dashboardReports: (days) => ["dashboard", "reports-over-time", days],
+  dashboardSeverity: ["dashboard", "severity"],
+  dashboardAttacks: (limit) => ["dashboard", "top-attack-types", limit],
+  dashboardAnomalies: (days) => ["dashboard", "anomalies-over-time", days],
 };
+
+// --- Dashboard ------------------------------------------------------------
+
+export function useDashboardSummary() {
+  return useQuery({ queryKey: keys.dashboardSummary, queryFn: dashboardApi.summary });
+}
+
+export function useReportsOverTime(days) {
+  return useQuery({
+    queryKey: keys.dashboardReports(days),
+    queryFn: () => dashboardApi.reportsOverTime(days),
+  });
+}
+
+export function useSeverityBreakdown() {
+  return useQuery({ queryKey: keys.dashboardSeverity, queryFn: dashboardApi.severity });
+}
+
+export function useTopAttackTypes(limit = 8) {
+  return useQuery({
+    queryKey: keys.dashboardAttacks(limit),
+    queryFn: () => dashboardApi.topAttackTypes(limit),
+  });
+}
+
+export function useAnomaliesOverTime(days) {
+  return useQuery({
+    queryKey: keys.dashboardAnomalies(days),
+    queryFn: () => dashboardApi.anomaliesOverTime(days),
+  });
+}
 
 // --- Documents ------------------------------------------------------------
 
@@ -28,7 +67,10 @@ export function useUploadDocument({ onProgress } = {}) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (file) => documentsApi.upload(file, onProgress),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.documents }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: keys.documents });
+      queryClient.invalidateQueries({ queryKey: keys.dashboard });
+    },
   });
 }
 
@@ -53,10 +95,15 @@ export function useGenerateReport() {
     onSuccess: (report) => {
       queryClient.setQueryData(keys.report(report.report_id), report);
       queryClient.invalidateQueries({ queryKey: keys.reports });
+      // Every aggregate on the dashboard is now one report out of date.
+      queryClient.invalidateQueries({ queryKey: keys.dashboard });
     },
     // A failed generation still persists a report row with status "failed",
-    // so the history list has changed either way.
-    onError: () => queryClient.invalidateQueries({ queryKey: keys.reports }),
+    // so the history list and the aggregates have changed either way.
+    onError: () => {
+      queryClient.invalidateQueries({ queryKey: keys.reports });
+      queryClient.invalidateQueries({ queryKey: keys.dashboard });
+    },
   });
 }
 
@@ -67,6 +114,7 @@ export function useDeleteReport() {
     onSuccess: (_, reportId) => {
       queryClient.removeQueries({ queryKey: keys.report(reportId) });
       queryClient.invalidateQueries({ queryKey: keys.reports });
+      queryClient.invalidateQueries({ queryKey: keys.dashboard });
     },
   });
 }

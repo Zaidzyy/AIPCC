@@ -50,12 +50,14 @@ backend/
       session.py            # engine + session factory (NEVER drop/create on import)
       models.py             # SQLAlchemy models
       seed.py               # explicit seed script, run manually
+      demo_data.py          # deterministic --demo fixtures (fixed seed, no LLM)
     schemas/                # Pydantic: API request/response + LLM output schemas
     api/routers/            # auth, users, documents, reports, chat, dashboard, integrations
     services/
       rag/                  # ingest, chunk, embed  (ported from prototype)
       llm/                  # LLMProvider abstraction + implementations
       report.py             # parallel section generation, validation, retry
+      analytics.py          # dashboard aggregation — GROUP BY in SQL, never ORM loops
       chatbot.py            # chat over ingested docs
       threat_intel.py       # AbuseIPDB / VirusTotal enrichment
       integrity.py          # FIM hash storage + comparison
@@ -67,6 +69,7 @@ frontend/
   src/
     index.css               # @theme tokens — the whole design system lives here
     App.jsx                 # routes only
+    components/charts/      # Recharts wrappers; ChartGrid is lazy-loaded — see below
     components/motion/      # CSS/SVG feature animations (no deps)
     components/ui/          # design system primitives (Radix behaviour, own styling)
     components/layout/      # AppShell, Sidebar, Topbar
@@ -98,6 +101,8 @@ uvicorn app.main:app --reload
 alembic upgrade head               # apply migrations
 alembic revision --autogenerate -m "msg"
 python -m app.db.seed              # seed demo data (never automatic)
+python -m app.db.seed --demo       # + six weeks of deterministic demo reports
+python -m app.db.seed --reset --demo   # wipe seeded users first, then re-seed
 pytest
 
 # Frontend
@@ -162,7 +167,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–3 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–4 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
@@ -170,17 +175,19 @@ Alembic migrations, explicit seed script, the ported RAG pipeline (ingest/chunk/
 `docker-compose.yml` (postgres + backend + frontend + n8n), report generation with a single
 canonical schema, concurrent sections, validation + one repair retry, an `LLMProvider` abstraction,
 the document/report endpoints n8n calls, OAuth2 password-flow auth with bcrypt, JWT and
-role-gated, ownership-scoped endpoints, **a persisted RAG chat over ingested documents, and the
+role-gated, ownership-scoped endpoints, a persisted RAG chat over ingested documents, the
 full React SPA — nine routes behind a single app shell, a Radix-based design system, and every
-server read going through TanStack Query.** 143 backend tests pass; `npm run lint` is clean.
+server read going through TanStack Query — **and five `/dashboard` aggregation endpoints backed by
+SQL `GROUP BY`, four Recharts views bound to them, and a `--demo` seed that populates them.**
+177 backend tests pass; `npm run lint` is clean.
 
-Not yet built: dashboard aggregate endpoints (Phase 4), n8n wiring (5), export (6), polish (7).
-The dashboard route exists and shows real counts computed from `/reports` and `/documents`; it does
-not yet have server-side aggregation.
+Not yet built: n8n wiring (Phase 5), export (6), polish (7).
 
 Seed credentials: `admin@aipcc.io` / `admin` (`python -m app.db.seed`).
 Add `--ingest` to embed the sample CSV — without it the document is registered but has no chunks,
 and report generation fails with "no indexed content for document …".
+Add `--demo` for a populated dashboard; it also creates `analyst@aipcc.io` / `analyst`, whose
+smaller numbers on the same page are the ownership scoping working.
 
 ### Decisions taken in Phase 0
 
@@ -294,6 +301,44 @@ and report generation fails with "no indexed content for document …".
 - **`cors_origins` needs `NoDecode`.** pydantic-settings runs `json.loads()` on complex types
   *before* field validators, so the comma-separated form documented in `.env.example` raised a
   `SettingsError` at import.
+
+### Decisions taken in Phase 4
+
+- **Aggregation is `services/analytics.py`, and it never loads ORM objects.** Every figure is a
+  `GROUP BY` executed in Postgres. The dashboard is the one screen that reads across *all* of a
+  user's reports, so per-row Python cost is the whole cost. The only loops in that module walk the
+  aggregated rows — one per day, one per severity.
+- **Severity is normalised in SQL, not in the browser.** `severity_bucket()` folds the free-text
+  `risk_level` into the canonical ladder with a `CASE` over prefix matches, so "Sev 1", "CRITICAL "
+  and "critical" are one bucket. The ladder mirrors `severityToken` in `lib/format.js` deliberately:
+  same buckets, same prefixes, two runtimes.
+- **Empty days are zeros, not absent rows.** A line chart that closes the gap between two distant
+  dates draws a trend that did not happen, so the series endpoints emit a bucket per day in the
+  window and fill the misses.
+- **There is no `open_alerts` KPI yet.** Alerts arrive in Phase 5 with the table that backs them.
+  A tile showing a hardcoded zero would be a lie in the shape of a feature, so the fourth KPI is
+  `attention_required` — reports that came back partial or failed — which is a real number today.
+- **A failed aggregate renders as `—`, never `0`.** On a security dashboard "I could not read this"
+  and "there are none" are the one pair of states that must never look alike.
+- **`--demo` calls no LLM.** `app/db/demo_data.py` is fixture data driven by a fixed-seed
+  `random.Random`, so two runs on the same day produce identical rows: screenshots are reproducible
+  and a bug in an aggregate cannot hide behind data that moved. It is idempotent per user — re-run
+  with `--reset --demo` to rebuild.
+- **`--demo` also seeds an analyst.** Ownership scoping is invisible with one account; with two,
+  the same dashboard showing 44 reports to the admin and 22 to the analyst demonstrates it.
+- **Recharts is behind `React.lazy`.** It is ~395 kB, and /dashboard is the landing route, so
+  importing it eagerly put the whole charting library in front of the first paint (entry bundle
+  588 → 985 kB). `components/charts/ChartGrid.jsx` is the lazy boundary; **nothing else may import
+  `recharts` directly** or the chunk merges back into the entry bundle. There is deliberately no
+  barrel file in `components/charts/` for that reason.
+- **Colour still only encodes severity or state.** The severity chart is chromatic and the
+  "needs attention" bar segment is amber; frequency and volume are graphite, because a taller bar
+  already says "more" and spending a hue on it would dilute every hue that means something.
+- **Chart axis dates are parsed field by field.** `new Date("2026-07-01")` is parsed as UTC
+  midnight, so west of Greenwich every bucket renders labelled one day early.
+- **Admin-scoped tests assert deltas, not absolutes.** The `db` fixture rolls back but an admin's
+  query still sees every pre-existing row in the developer's database, so `== 2` is only correct on
+  an empty machine.
 
 ### n8n workflows
 
