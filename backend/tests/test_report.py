@@ -260,6 +260,50 @@ class TestSectionGeneration:
         assert item.risk_level is None
         assert item.attack_description is None
 
+    def test_all_null_skeleton_is_rejected_and_retried(self, attack_spec, no_retrieval):
+        """A model echoing the template back is not a successful section.
+
+        Observed live with ollama/dolphin-llama3: valid JSON, valid schema,
+        every field null. Without this it stored an empty row and reported
+        "complete".
+        """
+        skeleton = json_skeleton(attack_spec.envelope)
+        provider = FakeProvider(skeleton, VALID_ATTACK_JSON)
+        outcome = asyncio.run(generate_section(attack_spec, "doc-1", provider))
+
+        assert len(provider.prompts) == 2, "the empty skeleton should trigger a retry"
+        assert "every item was empty" in provider.prompts[1]
+        assert outcome.error is None
+        assert outcome.items[0].attack_name == "Spyware Implant"
+
+    def test_persistent_skeleton_becomes_a_typed_error(self, attack_spec, no_retrieval):
+        skeleton = json_skeleton(attack_spec.envelope)
+        provider = FakeProvider(skeleton, skeleton)
+        outcome = asyncio.run(generate_section(attack_spec, "doc-1", provider))
+
+        assert outcome.items == []
+        assert outcome.error is not None
+        assert outcome.error.stage == "validation"
+
+    def test_partially_filled_items_are_kept(self, attack_spec, no_retrieval):
+        """Only *entirely* empty items are dropped; one field is enough."""
+        raw = '{"attack_types": [{"attack_name": "X"}, {"attack_name": null}]}'
+        provider = FakeProvider(raw)
+        outcome = asyncio.run(generate_section(attack_spec, "doc-1", provider))
+
+        assert outcome.error is None
+        assert len(outcome.items) == 1
+        assert outcome.items[0].attack_name == "X"
+
+    def test_genuinely_empty_section_is_allowed(self, attack_spec, no_retrieval):
+        """"No findings" is a real answer and must not be retried."""
+        provider = FakeProvider('{"attack_types": []}')
+        outcome = asyncio.run(generate_section(attack_spec, "doc-1", provider))
+
+        assert outcome.error is None
+        assert outcome.items == []
+        assert len(provider.prompts) == 1
+
     def test_counted_coerces_to_int(self):
         assert AnomalyItem(counted="42").counted == 42
         assert AnomalyItem(counted="many").counted is None
@@ -303,12 +347,17 @@ class TestFullReport:
 
 
 def _valid_for_prompt(prompt: str) -> str:
-    """Produce a minimally valid response for whichever section is asked."""
+    """Produce a minimally valid response for whichever section is asked.
+
+    The item must carry at least one non-null value: an entirely empty item is
+    the all-null skeleton, which is deliberately rejected and retried.
+    """
     import json as _json
 
     for spec in SECTION_SPECS:
         if f'"{spec.name}"' in prompt:
-            return _json.dumps({spec.name: [{}]})
+            first_field = next(iter(spec.item_model.model_fields))
+            return _json.dumps({spec.name: [{first_field: "something"}]})
     raise AssertionError("prompt matched no known section")
 
 

@@ -155,8 +155,14 @@ REQUIREMENTS
 
 OUTPUT
 ------
-Return a single JSON object exactly matching this structure:
+Return a single JSON object with exactly this shape:
 {json_skeleton(spec.envelope)}
+
+The nulls above show the field names only — they are NOT the answer. Replace
+them with values read from the log data. Use null only for a field the data
+genuinely does not contain, and never return an object whose fields are all
+null. If the data supports no findings at all, return an empty list rather than
+one empty object.
 
 Return raw JSON only. No markdown, no backticks, no commentary.
 """
@@ -177,7 +183,9 @@ Rewrite it as a single valid JSON object exactly matching this structure:
 {json_skeleton(spec.envelope)}
 
 Every key must be present; unknown values are null. Field names must match
-exactly. Return raw JSON only — no markdown, no backticks, no commentary.
+exactly. The structure above is a template showing the shape — do not return it
+unchanged. Fill it in with what the log data actually shows. Return raw JSON
+only — no markdown, no backticks, no commentary.
 """
 
 
@@ -298,8 +306,19 @@ async def generate_section(
             except ValidationError as exc:
                 last_error, last_stage = _summarize(exc), "validation"
             else:
-                items = getattr(validated, spec.name)
-                return SectionOutcome(spec.name, items=list(items))
+                raw_items = list(getattr(validated, spec.name))
+                items = [item for item in raw_items if not item.is_empty()]
+                if raw_items and not items:
+                    # The model echoed the all-null skeleton instead of
+                    # extracting anything. Valid JSON, valid schema, zero
+                    # content — worth another attempt.
+                    last_error, last_stage = (
+                        "every item was empty; the all-null template was returned "
+                        "instead of findings from the log data",
+                        "validation",
+                    )
+                else:
+                    return SectionOutcome(spec.name, items=items)
 
         if attempt == 1:
             logger.warning(

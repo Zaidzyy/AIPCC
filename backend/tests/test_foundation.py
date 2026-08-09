@@ -193,6 +193,35 @@ class TestRagLoaders:
         assert metadata["data_type"] == "text"
         assert metadata["row_count"] == 4  # trailing newline yields a final empty line
 
+    def test_vectorstore_is_a_thread_safe_singleton(self):
+        """The five report sections retrieve concurrently.
+
+        `@lru_cache` does not make construction atomic, so threads raced to open
+        the same Chroma directory and it failed with "Could not connect to
+        tenant default_tenant" during a live report run.
+        """
+        import threading
+
+        from app.services.rag.vectorstore import get_vectorstore
+
+        instances: list[int] = []
+        errors: list[str] = []
+
+        def worker() -> None:
+            try:
+                instances.append(id(get_vectorstore()))
+            except Exception as exc:  # pragma: no cover - the bug being guarded
+                errors.append(repr(exc))
+
+        threads = [threading.Thread(target=worker) for _ in range(8)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert errors == [], f"concurrent construction failed: {errors}"
+        assert len(set(instances)) == 1, "built more than one vector store"
+
     def test_unsupported_extension_raises(self, tmp_path):
         import pytest
 

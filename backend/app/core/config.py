@@ -6,14 +6,17 @@ Everything else imports `settings` from here. See CLAUDE.md > Conventions.
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Repo-root-relative anchor so default paths resolve the same way whether the
 # app is started from backend/, the repo root, or inside the container.
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+# `.env.example` sits at the repo root, and docker compose reads the root
+# `.env` for its ${VAR} substitution, so that is where a .env is expected.
+REPO_ROOT = BACKEND_DIR.parent
 
 # RFC 7518 §3.2 minimum for HS256.
 MIN_JWT_SECRET_BYTES = 32
@@ -21,7 +24,13 @@ MIN_JWT_SECRET_BYTES = 32
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
-        env_file=".env",
+        # Absolute paths, not ".env". A relative name resolves against the
+        # process working directory, so running the documented
+        # `cd backend && uvicorn app.main:app` silently ignored the .env at the
+        # repo root and fell back to defaults with no warning.
+        # Repo root first, backend/ second; later files win in pydantic-settings,
+        # so a backend-local .env can override the shared one.
+        env_file=(REPO_ROOT / ".env", BACKEND_DIR / ".env"),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -45,7 +54,10 @@ class Settings(BaseSettings):
 
     # --- LLM ---------------------------------------------------------------
     llm_provider: Literal["gemini", "ollama", "groq"] = "gemini"
-    llm_temperature: float = 0.7
+    # Low by design. This is structured extraction from logs, not creative
+    # writing: high temperature makes smaller models drift off the schema and
+    # invent MITRE ids. The prototype's 0.7 was arbitrary.
+    llm_temperature: float = 0.2
     gemini_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
     groq_api_key: str | None = None
@@ -66,16 +78,26 @@ class Settings(BaseSettings):
     upload_dir: Path = BACKEND_DIR / "uploads"
 
     # --- CORS --------------------------------------------------------------
-    cors_origins: list[str] = Field(
+    # NoDecode is required. For complex types pydantic-settings tries
+    # json.loads() on the raw env value *before* field validators run, so the
+    # comma-separated form documented in .env.example raised a SettingsError at
+    # import and took the whole app down. NoDecode hands the raw string to the
+    # validator below instead.
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:5173", "http://localhost:3000"]
     )
 
     @field_validator("cors_origins", mode="before")
     @classmethod
     def _split_cors_origins(cls, v: object) -> object:
-        """Accept a comma-separated string so .env stays readable."""
+        """Accept a comma-separated string, or a JSON array, or a list."""
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",") if origin.strip()]
+            text = v.strip()
+            if text.startswith("["):
+                import json
+
+                return json.loads(text)
+            return [origin.strip() for origin in text.split(",") if origin.strip()]
         return v
 
     @model_validator(mode="after")

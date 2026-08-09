@@ -53,6 +53,17 @@ class SectionItem(BaseModel):
 
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
 
+    def is_empty(self) -> bool:
+        """True when no field carries a value.
+
+        Every field is optional, so the all-null JSON skeleton the prompt shows
+        the model validates perfectly. Smaller models echo that skeleton back
+        verbatim instead of extracting anything, which would otherwise store a
+        row of nulls and report the section as a success — the exact
+        looks-fine-but-empty failure this rebuild exists to remove.
+        """
+        return all(value is None for value in self.model_dump().values())
+
 
 # --- Row types (field names == DB column names) ---------------------------
 
