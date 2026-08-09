@@ -9,7 +9,7 @@ deliberately.
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from app.api.routers import auth, documents, health, reports, users
+from app.api.routers import auth, chat, documents, health, reports, users
 from app.core.config import settings
 
 
@@ -34,6 +34,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(documents.router)
     app.include_router(reports.router)
+    app.include_router(chat.router)
 
     return app
 

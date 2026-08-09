@@ -249,7 +249,11 @@ class Chat(Base):
 
     user: Mapped[Users] = relationship(back_populates="chats")
     messages: Mapped[list[Message]] = relationship(
-        back_populates="chat", cascade="all, delete-orphan"
+        back_populates="chat",
+        cascade="all, delete-orphan",
+        # Ordered here rather than at each call site: a transcript rendered in
+        # insertion order is a correctness bug, not a display preference.
+        order_by="Message.created_at",
     )
 
 
