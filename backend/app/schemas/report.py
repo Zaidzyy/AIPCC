@@ -192,8 +192,6 @@ class GenerateReportRequest(BaseModel):
     document_id: uuid.UUID
     report_name: str = Field(min_length=1, max_length=255)
     classification: str = "Internal"
-    # Phase 2 replaces this with the authenticated user from the JWT.
-    user_id: uuid.UUID
 
 
 class ReportStatusResponse(BaseModel):
@@ -227,10 +225,12 @@ class StoreGeneratedReportRequest(BaseModel):
 
     The n8n orchestrator produces the same sections the Python generator does,
     so both land in the same tables through the same schema.
+
+    The report is attributed to the authenticated caller, so n8n must present a
+    token like any other client — see n8n/IMPORT.md.
     """
 
     document_id: uuid.UUID
-    user_id: uuid.UUID
     report_name: str = Field(min_length=1, max_length=255)
     classification: str = "Internal"
     sections: ReportSections

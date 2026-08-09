@@ -28,7 +28,10 @@ from app.core.security import hash_password
 from app.db.models import Document, Users
 from app.db.session import SessionLocal
 
-ADMIN_EMAIL = "admin@aipcc.local"
+# Not a .local / .test / .invalid address: those are reserved special-use
+# domains and `EmailStr` rejects them, so a seeded admin using one could not be
+# serialized by the API that is supposed to return it.
+ADMIN_EMAIL = "admin@aipcc.io"
 ADMIN_PASSWORD = "admin"  # noqa: S105 — local demo credential, documented in README
 SAMPLE_CSV = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic_pegasus_dataset.csv"
 

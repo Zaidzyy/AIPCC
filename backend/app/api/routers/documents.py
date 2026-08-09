@@ -1,8 +1,7 @@
 """Document upload and retrieval.
 
-`user_id` is an explicit parameter here rather than a hidden global. Phase 2
-replaces it with the authenticated user from the JWT — the prototype's
-hardcoded `current_user` is never coming back.
+The owner is always the authenticated caller — never a value taken from the
+request body, and never a module-level global.
 """
 
 from __future__ import annotations
@@ -11,10 +10,11 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from app.api.deps import authorize_owner, get_current_user, is_admin
 from app.core.config import settings
 from app.db import models
 from app.db.session import get_db
@@ -30,7 +30,7 @@ MAX_UPLOAD_BYTES = 50 * 1024 * 1024
 @router.post("/upload_file", response_model=DocumentDetail, status_code=201)
 async def upload_file(
     file: UploadFile = File(...),
-    user_id: uuid.UUID = Form(...),
+    user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> DocumentDetail:
     """Store a log file, register it, and ingest it into the vector store."""
@@ -44,10 +44,6 @@ async def upload_file(
             f"unsupported file type {extension!r}. "
             f"Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
         )
-
-    owner = db.get(models.Users, user_id)
-    if owner is None:
-        raise HTTPException(404, f"user {user_id} not found")
 
     payload = await file.read()
     if len(payload) > MAX_UPLOAD_BYTES:
@@ -73,7 +69,7 @@ async def upload_file(
         created_at=now,
         modified_at=now,
         uploaded_at=now,
-        user_id=user_id,
+        user_id=user.user_id,
     )
     db.add(document)
     db.flush()
@@ -95,29 +91,29 @@ async def upload_file(
 
 @router.get("/documents", response_model=list[DocumentSummary])
 def list_documents(
-    user_id: uuid.UUID | None = None,
+    user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> list[DocumentSummary]:
     statement = select(models.Document).order_by(models.Document.uploaded_at.desc())
-    if user_id:
-        statement = statement.where(models.Document.user_id == user_id)
+    if not is_admin(user):
+        statement = statement.where(models.Document.user_id == user.user_id)
     return [DocumentSummary.model_validate(d) for d in db.scalars(statement).all()]
 
 
 @router.get("/get_latest_document_content", response_model=LatestDocumentContent)
 def get_latest_document_content(
-    user_id: uuid.UUID | None = None,
     max_chars: int = 200_000,
+    user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> LatestDocumentContent:
-    """Return the most recently uploaded document's raw text.
+    """Return the caller's most recently uploaded document as raw text.
 
     Called by the n8n AI Security Report Orchestrator, which previously
     pointed at this path with nothing behind it.
     """
     statement = select(models.Document).order_by(models.Document.uploaded_at.desc())
-    if user_id:
-        statement = statement.where(models.Document.user_id == user_id)
+    if not is_admin(user):
+        statement = statement.where(models.Document.user_id == user.user_id)
 
     document = db.scalars(statement.limit(1)).first()
     if document is None:
@@ -144,11 +140,14 @@ def get_latest_document_content(
 
 @router.get("/documents/{document_id}", response_model=DocumentSummary)
 def get_document(
-    document_id: uuid.UUID, db: Session = Depends(get_db)
+    document_id: uuid.UUID,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ) -> DocumentSummary:
     document = db.get(models.Document, document_id)
     if document is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"document {document_id} not found")
+    authorize_owner(user, document.user_id)
     return DocumentSummary.model_validate(document)
 
 

@@ -20,9 +20,9 @@ pydantic>=2.9,<3.0
 pydantic-settings>=2.6,<3.0
 
 # --- Security ---
-# Phase 0 uses this only so seed.py never writes a plaintext password.
-# Phase 2 adds the JWT dependencies alongside it.
 bcrypt>=4.2,<6.0
+PyJWT>=2.10,<3.0
+email-validator>=2.2,<3.0
 
 # --- Database ---
 SQLAlchemy>=2.0.36,<3.0

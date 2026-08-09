@@ -8,12 +8,15 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Repo-root-relative anchor so default paths resolve the same way whether the
 # app is started from backend/, the repo root, or inside the container.
 BACKEND_DIR = Path(__file__).resolve().parents[2]
+
+# RFC 7518 §3.2 minimum for HS256.
+MIN_JWT_SECRET_BYTES = 32
 
 
 class Settings(BaseSettings):
@@ -33,8 +36,10 @@ class Settings(BaseSettings):
     # Points at the Docker Postgres by default. Never a managed/external DB.
     database_url: str = "postgresql+psycopg://aipcc:aipcc@localhost:5432/aipcc"
 
-    # --- Auth (wired up in Phase 2; defined here so config stays central) ---
-    jwt_secret: str = "dev-only-change-me"
+    # --- Auth ---------------------------------------------------------------
+    # HS256 wants >= 32 bytes of key (RFC 7518 §3.2); PyJWT warns below that.
+    # The default is long enough to be valid but is obviously not a secret.
+    jwt_secret: str = "dev-only-insecure-secret-change-me-before-deploying"
     jwt_algorithm: str = "HS256"
     access_token_expire_minutes: int = 60
 
@@ -72,6 +77,21 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _check_jwt_secret(self) -> "Settings":
+        """Refuse to start outside local with a weak or default signing key."""
+        if self.environment == "local":
+            return self
+        if len(self.jwt_secret.encode()) < MIN_JWT_SECRET_BYTES:
+            raise ValueError(
+                f"JWT_SECRET must be at least {MIN_JWT_SECRET_BYTES} bytes in "
+                f"{self.environment}. Generate one with: "
+                'python -c "import secrets; print(secrets.token_urlsafe(48))"'
+            )
+        if self.jwt_secret.startswith("dev-only"):
+            raise ValueError(f"the development JWT_SECRET cannot be used in {self.environment}")
+        return self
 
     @property
     def is_local(self) -> bool:

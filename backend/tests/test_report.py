@@ -322,7 +322,7 @@ def owner_and_document(db):
     user = models.Users(
         first_name="Test",
         last_name="Analyst",
-        email=f"test-{uuid.uuid4().hex[:8]}@aipcc.local",
+        email=f"test-{uuid.uuid4().hex[:8]}@aipcc.io",
         role="analyst",
         status="Active",
         password_hash=hash_password("x"),

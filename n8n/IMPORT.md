@@ -13,6 +13,30 @@ inside the n8n container to the host, which is correct when the backend runs on
 your machine. If you run the backend via `docker compose`, change it to
 `http://backend:8000` so it resolves over the compose network.
 
+## Authentication (required since Phase 2)
+
+Every backend endpoint except `/` and `/health/db` now requires a bearer token.
+The workflows as exported send no `Authorization` header, so **each HTTP node
+that calls the backend must be given one** or it will get a 401.
+
+Get a token:
+
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -d "username=admin@aipcc.io&password=admin"
+```
+
+Add it in n8n as a **Header Auth** credential — name `Authorization`, value
+`Bearer <token>` — and attach it to each backend HTTP node.
+
+Reports are attributed to whoever the token belongs to, and non-admins only see
+their own. Use an admin token if a workflow needs to read across all users, as
+the FIM engine does when it polls `/get_all_reports`.
+
+Tokens expire after `ACCESS_TOKEN_EXPIRE_MINUTES` (default 60), which is fine
+for testing but not for a scheduled workflow. A long-lived service-account
+token is a Phase 5 task.
+
 ---
 
 ## 1. Simple Report Generator (3 nodes)

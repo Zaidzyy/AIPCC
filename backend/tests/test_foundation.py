@@ -90,6 +90,39 @@ class TestHardRules:
         hits = [h for h in _scan_app(r"os\.getenv|os\.environ") if "app/core/config.py" not in h]
         assert hits == [], "env read outside config.py:\n" + "\n".join(hits)
 
+    def test_no_module_level_current_user(self):
+        """CLAUDE.md hard rule #2.
+
+        The prototype assigned a module-global `current_user` inside a route
+        handler, so six other routes raised NameError until that one endpoint
+        had been called. The caller must come from `get_current_user`.
+        """
+        hits = [
+            h
+            for h in _scan_app(r"^\s*current_user\s*=")
+            # A local binding from the dependency is fine; a global is not.
+            if "Depends" not in h
+        ]
+        assert hits == [], "current_user assigned directly:\n" + "\n".join(hits)
+
+    def test_password_hash_always_comes_from_hash_password(self):
+        """CLAUDE.md hard rule #3.
+
+        The prototype wrote `password_hash = new_user.password`. Rather than
+        pattern-matching that one shape, require the inverse: every value
+        assigned to `password_hash` must have passed through `hash_password()`.
+        """
+        assignments = _scan_app(r"password_hash\s*=")
+        offenders = [
+            line
+            for line in assignments
+            # The column definition itself is a declaration, not an assignment.
+            if "mapped_column" not in line and "hash_password(" not in line
+        ]
+        assert offenders == [], (
+            "password_hash assigned without hashing:\n" + "\n".join(offenders)
+        )
+
 
 class TestModels:
     def test_all_expected_tables_registered(self):

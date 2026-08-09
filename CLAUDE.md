@@ -151,7 +151,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–1 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–2 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
@@ -159,10 +159,12 @@ Alembic migrations, explicit seed script, the ported RAG pipeline (ingest/chunk/
 `docker-compose.yml` (postgres + backend + frontend + n8n), the frontend scaffold (Vite + React 19 +
 Router + Tailwind v4 + TanStack Query) with one placeholder route, **report generation with a single
 canonical schema, concurrent sections, validation + one repair retry, an `LLMProvider` abstraction,
-and the document/report endpoints n8n calls.**
+the document/report endpoints n8n calls, and OAuth2 password-flow auth with bcrypt, JWT and
+role-gated, ownership-scoped endpoints.**
 
-Not yet built: auth (Phase 2), real pages (Phase 3). Until Phase 2, endpoints take `user_id` as an
-explicit parameter — never a hidden global.
+Not yet built: real pages (Phase 3), dashboard (4), n8n wiring (5), export (6), polish (7).
+
+Seed credentials: `admin@aipcc.io` / `admin` (`python -m app.db.seed`).
 
 ### Decisions taken in Phase 0
 
@@ -194,6 +196,23 @@ explicit parameter — never a hidden global.
 - **Provider failures are not retried** — re-prompting cannot fix a rejected API key.
 - **`store_report` is shared** by the Python generator and `POST /store_generated_report`, so
   app-generated and n8n-generated reports land in identical tables.
+
+### Decisions taken in Phase 2
+
+- **`get_current_user` is the only way a route learns who is calling.** No module-level user, ever.
+- **Ownership violations return 404, not 403.** A 403 confirms the id is real to someone who should
+  not know that.
+- **Login is constant-shaped**: identical error text for unknown email and wrong password, and a dummy
+  bcrypt verification on the unknown-email path so latency does not distinguish the two.
+- **`/auth/register` always creates an `analyst`.** A `role` in the body is ignored, never honoured;
+  only the admin-only `POST /users` can set one.
+- **`UserPublic.email` is `str`, not `EmailStr`.** Addresses are validated strictly on input.
+  Re-validating on output means one bad historical row raises inside the list endpoint and breaks the
+  listing for everyone. This was found live: the seeded `admin@aipcc.local` is a reserved-domain
+  address that `EmailStr` rejects, and it took down `GET /users`. Seed now uses `admin@aipcc.io`.
+- **`JWT_SECRET` must be ≥32 bytes outside `local`**, and the dev default is refused there — HS256
+  wants at least that (RFC 7518 §3.2) and PyJWT warns below it.
+- **Admins cannot demote, deactivate or delete themselves**, so the last admin can't lock everyone out.
 
 ### n8n workflows
 
