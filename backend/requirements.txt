@@ -5,6 +5,15 @@
 # --- Web ---
 fastapi>=0.115,<1.0
 uvicorn[standard]>=0.32,<1.0
+python-multipart>=0.0.20,<1.0
+
+# --- LLM providers ---
+# langchain-core is required; the three provider packages are each only needed
+# for the backend you actually select with LLM_PROVIDER (imports are deferred).
+langchain-core>=0.3,<1.0
+langchain-google-genai>=2.0,<3.0
+langchain-groq>=0.2,<1.0
+langchain-ollama>=0.2,<1.0
 
 # --- Config ---
 pydantic>=2.9,<3.0

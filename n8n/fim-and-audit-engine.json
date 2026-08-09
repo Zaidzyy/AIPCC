@@ -1,0 +1,821 @@
+{
+  "name": "Automated File Integrity Monitoring (FIM) and Audit Engine",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 1
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        144,
+        960
+      ],
+      "id": "b56cd4ad-6207-4a55-a7cf-acba69d0fb07",
+      "name": "Scheduled Integrity Scan"
+    },
+    {
+      "parameters": {
+        "url": "http://host.docker.internal:8000/get_all_reports",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        400,
+        832
+      ],
+      "id": "b4e9c842-b53e-48ef-b76d-baad945681a8",
+      "name": "Fetch Reports Batch",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        544,
+        1072
+      ],
+      "id": "5661e97a-da04-412b-a787-3cd26fe5d52a",
+      "name": "Batch Control"
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/get_report_by_id/{{ $json.report_id }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        784,
+        816
+      ],
+      "id": "5c90bb26-d311-427a-9a4b-b83bb71e7f89",
+      "name": "Fetch Report Metadata",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/uploads/{{$json.report[0].document_name}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        912,
+        1232
+      ],
+      "id": "e3eb0e7f-1bf4-4598-94a0-6683653bb2c1",
+      "name": "Fetch Stored Hash",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "type": "SHA256",
+        "binaryData": true,
+        "dataPropertyName": "current_hash"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 1,
+      "position": [
+        1072,
+        800
+      ],
+      "id": "b8b8c174-c15e-4be6-bd71-f848c555f29b",
+      "name": "Generate SHA256 Hash"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "730de236-6144-48cb-8070-b2d9f49d7eaf",
+              "leftValue": "={{$json.current_hash}}",
+              "rightValue": "={{$json.file_hash}}",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1312,
+        960
+      ],
+      "id": "6a7b40d6-ba4a-4966-b66f-a286c6a4a2ad",
+      "name": "Integrity Comparison Check"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "fa355071-525e-4652-94b3-e02d58737ec1",
+              "name": "audit_status",
+              "value": "OK",
+              "type": "string"
+            },
+            {
+              "id": "9c8b1ae6-7be0-4d31-b5c2-7a01aedcabd0",
+              "name": "audit_message",
+              "value": "File integrity verified",
+              "type": "string"
+            },
+            {
+              "id": "ebc65295-3442-4986-adec-32c63bc51eb8",
+              "name": "report_id",
+              "value": "={{ $json.report_id }}",
+              "type": "string"
+            },
+            {
+              "id": "7bff4765-6219-478b-9ee0-41e840e9c9e8",
+              "name": "risk_score",
+              "value": "10",
+              "type": "string"
+            },
+            {
+              "id": "3bbea6d0-6b82-41e7-9f3f-b0595c41ae7b",
+              "name": "risk_level",
+              "value": "low",
+              "type": "string"
+            },
+            {
+              "id": "2b1b740c-4284-41ee-91aa-92f7f10e2b9f",
+              "name": "execution_timestamp",
+              "value": "={{$now}}",
+              "type": "string"
+            },
+            {
+              "id": "69f126fe-8ae9-41ea-8ee4-bd7e0c63059c",
+              "name": "workflow_name",
+              "value": "Integrity Monitoring & Audit Engine",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1648,
+        752
+      ],
+      "id": "52d010f4-f875-4e0e-b5b4-58e120282bdc",
+      "name": "Build Integrity Success Payload"
+    },
+    {
+      "parameters": {
+        "curlImport": "",
+        "httpVariantWarning": "",
+        "method": "GET",
+        "url": "=https://www.virustotal.com/api/v3/files/{{ $json.current_hash }}",
+        "": "",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "virusTotalApi",
+        "provideSslCertificates": false,
+        "sendQuery": false,
+        "sendHeaders": false,
+        "sendBody": false,
+        "options": {
+          "response": {
+            "response": {
+              "fullResponse": false,
+              "neverError": false,
+              "responseFormat": "json"
+            }
+          }
+        },
+        "infoMessage": ""
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        1504,
+        992
+      ],
+      "id": "51ebb682-33c1-4c55-8d7d-cdc70319711b",
+      "name": "VirusTotal HTTP Request",
+      "extendsCredential": "virusTotalApi",
+      "credentials": {
+        "virusTotalApi": {
+          "id": "SLV9oQJfM69sdAbM",
+          "name": "VirusTotal account"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "b100f45e-5edd-4392-a29e-bea03482ffdc",
+              "leftValue": "={{ $json.error.message }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "exists",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1696,
+        1104
+      ],
+      "id": "7de43e53-3876-4f31-967c-ba3c433379bc",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "514244e5-7fbc-4dda-8dd5-c4bd5d2fef66",
+              "name": "audit_status",
+              "value": "TAMPERED",
+              "type": "string"
+            },
+            {
+              "id": "2839cf4d-10d3-46af-89c5-c165beb69735",
+              "name": "audit_message",
+              "value": "=🚨 CRITICAL: File integrity mismatch detected for Report ID {{ $json.report_id }}. Data may have been modified by an unauthorized user!.",
+              "type": "string"
+            },
+            {
+              "id": "82ae5cfe-a657-44bb-9186-01e83f039e8a",
+              "name": "report_id",
+              "value": "={{ $json.report_id }}",
+              "type": "string"
+            },
+            {
+              "id": "b3c9ebf5-5ed3-4c7e-bed1-1521a664c077",
+              "name": "risk_score",
+              "value": "90",
+              "type": "string"
+            },
+            {
+              "id": "f05fc249-fe1d-437a-b726-e7fa29453252",
+              "name": "risk_level",
+              "value": "CRITICAL",
+              "type": "string"
+            },
+            {
+              "id": "85e523ea-2a6a-42c0-87f5-0a190079989c",
+              "name": "execution_timestamp",
+              "value": "={{$now}}",
+              "type": "string"
+            },
+            {
+              "id": "2aa9608c-83e5-4cba-ad4f-fc6e3e136c08",
+              "name": "vt_malicious",
+              "value": "={{ $json.malicious_count || 0 }}",
+              "type": "string"
+            },
+            {
+              "id": "0988dc97-6759-432f-a5fe-c6987ccbe1c1",
+              "name": "vt_suspicious",
+              "value": "={{ $json.suspicious_count || 0 }}",
+              "type": "string"
+            },
+            {
+              "id": "c3b2647e-f587-4be0-9b3b-71cbf8a52464",
+              "name": "vt_status",
+              "value": "={{ $json.malicious_count !== undefined ? \"FOUND\" : \"UNKNOWN\" }}",
+              "type": "string"
+            },
+            {
+              "id": "e404d5a6-4dc4-4e59-8212-895405701bef",
+              "name": "vt_risk_level",
+              "value": "={{ \n  $json.malicious_count > 5 ? \"CRITICAL\" :\n  $json.malicious_count > 0 ? \"HIGH\" :\n  $json.suspicious_count > 5 ? \"MEDIUM\" :\n  $json.suspicious_count > 0 ? \"LOW\" :\n  \"CLEAN\"\n}}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        2208,
+        1184
+      ],
+      "id": "ecf2c5b3-a082-4d0e-85a3-b896df1e8911",
+      "name": "Build Tamper Alert Payload1"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://host.docker.internal:8000/api/security/alert",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "status",
+              "value": "={{ $json.audit_status }}"
+            },
+            {
+              "name": "message",
+              "value": "={{ $json.audit_message }}"
+            },
+            {
+              "name": "report_id",
+              "value": "={{ $json.report_id }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2512,
+        1152
+      ],
+      "id": "de2e3f54-9de3-41f8-a014-347cbaf7b2f6",
+      "name": "Send Security Alert1",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4176eae0-886d-4bb8-a1b9-0a98663a7786",
+              "name": "vt_report_id",
+              "value": "={{ $json.data.id }}",
+              "type": "string"
+            },
+            {
+              "id": "4606e4ea-09d5-4c28-81a9-cfcff6cfc09e",
+              "name": "malicious_count",
+              "value": "={{ $json.data.attributes.last_analysis_stats.malicious }}",
+              "type": "number"
+            },
+            {
+              "id": "c9f837e3-3205-411d-bc4f-ee2e52d230e6",
+              "name": "suspicious_count",
+              "value": "={{ $json.data.attributes.last_analysis_stats.suspicious }}",
+              "type": "number"
+            },
+            {
+              "id": "31e119bb-cf18-4664-ac6f-3259e07f2a8b",
+              "name": "harmless_count",
+              "value": "={{ $json.data.attributes.last_analysis_stats.harmless }}",
+              "type": "number"
+            },
+            {
+              "id": "771a95cf-3976-4e10-8c7c-e5bc439d5a99",
+              "name": "total_engines",
+              "value": "={{ Object.values($json.data.attributes.last_analysis_stats).reduce((a,b)=>a+b,0) }}",
+              "type": "number"
+            },
+            {
+              "id": "20083e31-ec61-4aff-adbf-e681d432fa84",
+              "name": "report_id",
+              "value": "={{ $json.report_id }}",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        1952,
+        1216
+      ],
+      "id": "ff257735-9589-4ee6-887c-2671f1bd65c4",
+      "name": "Extract VT Score"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1728,
+        1328
+      ],
+      "id": "7964fdcd-64b4-4344-90b3-617275a18b7b",
+      "name": "Correlate Threat Intelligence Data"
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://host.docker.internal:8000/api/report/integrity/{{$json[\"report_id\"]}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "integrity_state",
+              "value": "SEALED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2000,
+        720
+      ],
+      "id": "91678106-3a7f-4497-9407-d720c2a4d619",
+      "name": "Update Integrity State - SEALED",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "PATCH",
+        "url": "=http://host.docker.internal:8000/api/report/integrity/{{$json[\"report_id\"]}}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "integrity_state",
+              "value": "TAMPERED"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        2336,
+        1008
+      ],
+      "id": "6c50af73-d20c-4c80-9d76-1317482a5126",
+      "name": "Update Integrity State - TAMPERED",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=http://host.docker.internal:8000/documents/{{$json[\"report\"][0][\"document_id\"]}}/download",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "file"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        944,
+        512
+      ],
+      "id": "0109602a-bfc9-4061-bb94-7f46306de8a0",
+      "name": "Download Original File",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "fhVmPlxwHyYlaTbq",
+          "name": "Header Auth account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1136,
+        1056
+      ],
+      "id": "63c9786a-0172-4f59-b739-1f0f6e9b6a9f",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "fieldToSplitOut": "reports",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.splitOut",
+      "typeVersion": 1,
+      "position": [
+        336,
+        1168
+      ],
+      "id": "0d4f4512-baf7-4e98-b51c-6b17bc133394",
+      "name": "Split Reports"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Scheduled Integrity Scan": {
+      "main": [
+        [
+          {
+            "node": "Fetch Reports Batch",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Reports Batch": {
+      "main": [
+        [
+          {
+            "node": "Split Reports",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Batch Control": {
+      "main": [
+        [
+          {
+            "node": "Fetch Report Metadata",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Report Metadata": {
+      "main": [
+        [
+          {
+            "node": "Download Original File",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Fetch Stored Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch Stored Hash": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Generate SHA256 Hash": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Integrity Comparison Check": {
+      "main": [
+        [
+          {
+            "node": "Build Integrity Success Payload",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "VirusTotal HTTP Request",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Correlate Threat Intelligence Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "VirusTotal HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Correlate Threat Intelligence Data",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Correlate Threat Intelligence Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Tamper Alert Payload1": {
+      "main": [
+        [
+          {
+            "node": "Update Integrity State - TAMPERED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract VT Score": {
+      "main": [
+        [
+          {
+            "node": "Build Tamper Alert Payload1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Correlate Threat Intelligence Data": {
+      "main": [
+        [
+          {
+            "node": "Extract VT Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build Integrity Success Payload": {
+      "main": [
+        [
+          {
+            "node": "Update Integrity State - SEALED",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Update Integrity State - TAMPERED": {
+      "main": [
+        [
+          {
+            "node": "Send Security Alert1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download Original File": {
+      "main": [
+        [
+          {
+            "node": "Generate SHA256 Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Integrity Comparison Check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split Reports": {
+      "main": [
+        [
+          {
+            "node": "Batch Control",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "availableInMCP": false
+  },
+  "versionId": "f66af42e-3cb0-4b5f-bf0f-c6f4b940d451",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "014e11b6149674871bd2e7c25654d98c85e17f3c794f0aa95a2f6e27c146578c"
+  },
+  "id": "PjObwnsxZCBTX23E7QnAe",
+  "tags": []
+}

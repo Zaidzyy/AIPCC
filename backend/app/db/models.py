@@ -113,6 +113,10 @@ class Report(Base):
         ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
     )
     classification: Mapped[str] = mapped_column(String(50), nullable=False, default="Internal")
+    # pending | generating | complete | partial | failed
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    # Why a report is partial or failed — surfaced by GET /reports/{id}/status.
+    error_detail: Mapped[str | None] = mapped_column(Text)
 
     user: Mapped[Users] = relationship(back_populates="reports")
     document: Mapped[Document] = relationship(back_populates="reports")

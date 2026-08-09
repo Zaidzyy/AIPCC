@@ -151,16 +151,18 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phase 0 (Foundation) — complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–1 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
-Alembic initial migration, explicit seed script, the ported RAG pipeline (ingest/chunk/embed/
-vectorstore), `docker-compose.yml` (postgres + backend + frontend + n8n), and the frontend scaffold
-(Vite + React 19 + Router + Tailwind v4 + TanStack Query) with one placeholder route.
+Alembic migrations, explicit seed script, the ported RAG pipeline (ingest/chunk/embed/vectorstore),
+`docker-compose.yml` (postgres + backend + frontend + n8n), the frontend scaffold (Vite + React 19 +
+Router + Tailwind v4 + TanStack Query) with one placeholder route, **report generation with a single
+canonical schema, concurrent sections, validation + one repair retry, an `LLMProvider` abstraction,
+and the document/report endpoints n8n calls.**
 
-Not yet built: auth (Phase 2), report generation (Phase 1), real pages (Phase 3). `services/llm/` and
-`schemas/` are empty packages awaiting Phase 1.
+Not yet built: auth (Phase 2), real pages (Phase 3). Until Phase 2, endpoints take `user_id` as an
+explicit parameter — never a hidden global.
 
 ### Decisions taken in Phase 0
 
@@ -178,12 +180,29 @@ Not yet built: auth (Phase 2), report generation (Phase 1), real pages (Phase 3)
   `tests/test_foundation.py::TestHardRules`. The scanner masks comments and string literals before
   matching, so it tests code rather than prose.
 
-### Known gap carried into Phase 5
+### Decisions taken in Phase 1
 
-The three n8n workflow JSONs described in `AIPCC_REBUILD_PLAN.md` §2 **do not exist in the prototype
-repo** and were never committed to it on any branch. `PORTING.md` lists them as portable; there is
-nothing to port. They must be exported from whichever n8n instance holds them, or rebuilt. Related:
-commits `c836a19` and `bd55a3f` in the prototype added `file_hash` / security-alert endpoints that are
-absent from its current tree — recoverable with `git show` as reference material.
+- **The canonical schema lives in `app/schemas/report.py`** and its field names are identical to the
+  ORM column names, so storage is `Model(**item.model_dump())` with no mapping step to drift.
+  Enforced by `tests/test_report.py::TestSchemaAlignment`.
+- **Attack risk fields are flat, not nested.** The prototype's prompt nested them under
+  `risk_assessment` while the table stored them flat. Flat matches the columns.
+- **Prompt JSON skeletons are generated from the Pydantic models** (`json_skeleton`), so renaming a
+  field updates the prompt automatically.
+- **A section that fails twice returns a typed `SectionError`**, and the report is stored with status
+  `partial` or `failed`. One bad section no longer sinks the whole report.
+- **Provider failures are not retried** — re-prompting cannot fix a rejected API key.
+- **`store_report` is shared** by the Python generator and `POST /store_generated_report`, so
+  app-generated and n8n-generated reports land in identical tables.
+
+### n8n workflows
+
+Recovered and committed to `n8n/` — see `n8n/IMPORT.md`. They were never in the prototype repo; they
+came from a live n8n instance. Phase 1 built the three endpoints the Orchestrator needs. The FIM
+engine still needs four endpoints that arrive in Phase 5 (`/uploads/{name}`,
+`/documents/{id}/download`, `PATCH /api/report/integrity/{id}`, `POST /api/security/alert`).
+
+Prototype commits `c836a19` and `bd55a3f` added partial `file_hash` / security-alert support that is
+absent from its final tree — `git show` recovers it as Phase 5 reference material.
 
 **Update this section at the end of every phase.**
