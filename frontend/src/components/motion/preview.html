@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIPCC feature motion — preview</title>
+<style>
+  body{margin:0;background:#05070d;color:#c7d2ea;font-family:ui-sans-serif,system-ui,sans-serif;padding:28px}
+  h1{font-size:16px;font-weight:600;letter-spacing:.02em;margin:0 0 18px}
+  .wrap{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;max-width:760px}
+  @media(max-width:560px){.wrap{grid-template-columns:1fr}}
+  .card{background:#0a0e1a;border:1px solid #1f2b47;border-radius:14px;padding:14px}
+  .cap{margin-top:10px;font-size:13px;font-weight:600}.cap em{color:#7c8bb0;font-style:normal;font-weight:500}
+</style>
+<link rel="stylesheet" href="./motion.css">
+</head><body>
+<h1>AIPCC · feature motion animations (code, not video)</h1>
+<div class="wrap">
+  <div class="card"><div class="fm fm-rag"><div class="doc"><span></span><span></span><span></span><span></span><span></span></div><div class="stream"></div><div class="panel"><b style="--h:60%"></b><b style="--h:85%"></b><b style="--h:45%"></b><b style="--h:70%"></b></div></div><div class="cap">Report generation <em>· RAG</em></div></div>
+  <div class="card"><div class="fm fm-anom"><div class="grid" id="grid"></div><div class="scan"></div></div><div class="cap">Anomaly detection</div></div>
+  <div class="card"><div class="fm fm-seal"><svg viewBox="0 0 100 100" width="96" height="96"><circle class="ring" cx="50" cy="50" r="34"/><rect class="body" x="34" y="46" width="32" height="26" rx="4"/><path class="shackle" d="M40 46 v-6 a10 10 0 0 1 20 0 v6"/><path class="check" d="M43 59 l5 5 l9 -10"/></svg></div><div class="cap">File integrity <em>· FIM</em></div></div>
+  <div class="card"><div class="fm fm-wave"><div class="bars" id="wave"></div></div><div class="cap">Talk to your data <em>· chat</em></div></div>
+</div>
+<script>
+  var g=document.getElementById('grid'),hot=[10,13,22,31,40,49];
+  for(var i=0;i<54;i++){var d=document.createElement('span');d.className='dot'+(hot.indexOf(i)>-1?' hot':'');if(hot.indexOf(i)>-1)d.style.animationDelay=(hot.indexOf(i)*0.15)+'s';g.appendChild(d);}
+  var w=document.getElementById('wave');
+  for(var j=0;j<22;j++){var b=document.createElement('i');b.style.animationDelay=(j*0.06)+'s';b.style.height=(20+Math.random()*40)+'%';w.appendChild(b);}
+</script>
+</body></html>

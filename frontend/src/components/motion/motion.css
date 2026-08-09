@@ -1,0 +1,60 @@
+/* AIPCC feature motion animations — pure CSS/SVG, no dependencies.
+   Palette is driven by CSS variables so it inherits your theme. */
+.fm{
+  --fm-bg:#070a12;
+  --fm-panel:#0f1524;
+  --fm-line:#1f2b47;
+  --fm-cyan:#22d3ee;
+  --fm-cyan-deep:#0e7490;
+  --fm-amber:#f59e0b;
+  --fm-red:#ef4444;
+  --fm-green:#34d399;
+  position:relative;
+  height:150px;
+  border-radius:10px;
+  background:var(--fm-bg);
+  display:flex;align-items:center;justify-content:center;
+  overflow:hidden;
+}
+/* Ambient feature beats keep animating under prefers-reduced-motion, to stay consistent with the
+   ambient video loops (see public/video/manifest.md). These are small, contained, non-parallax
+   animations behind content — not the motion that setting targets. The only reduced-motion gate in
+   the app is the intro's full-screen flash. If you ever need to kill these, re-enable:
+   @media (prefers-reduced-motion: reduce){ .fm *{animation:none !important} } */
+
+/* ---------- RAG report generation ---------- */
+.fm-rag .doc{position:absolute;left:26px;width:52px;height:70px;background:var(--fm-panel);border:1px solid var(--fm-line);border-radius:6px;display:flex;flex-direction:column;gap:6px;padding:9px 8px;animation:fm-docOut 4s ease-in-out infinite}
+.fm-rag .doc span{height:4px;border-radius:2px;background:linear-gradient(90deg,#2b3a5e,#1a2440)}
+.fm-rag .doc span:nth-child(2){width:80%}.fm-rag .doc span:nth-child(4){width:60%}.fm-rag .doc span:nth-child(5){width:75%}
+.fm-rag .stream{position:absolute;left:70px;right:78px;height:2px;background:linear-gradient(90deg,transparent,var(--fm-cyan),transparent);opacity:0;filter:drop-shadow(0 0 6px var(--fm-cyan));animation:fm-stream 4s ease-in-out infinite}
+.fm-rag .panel{position:absolute;right:24px;width:66px;height:70px;background:var(--fm-panel);border:1px solid #22406a;border-radius:6px;display:flex;align-items:flex-end;gap:5px;padding:10px 9px;animation:fm-panelIn 4s ease-in-out infinite}
+.fm-rag .panel b{flex:1;height:0;background:linear-gradient(180deg,var(--fm-cyan),var(--fm-cyan-deep));border-radius:2px;animation:fm-bar 4s ease-in-out infinite}
+.fm-rag .panel b:nth-child(1){animation-delay:1.6s}.fm-rag .panel b:nth-child(2){animation-delay:1.8s}.fm-rag .panel b:nth-child(3){animation-delay:2s}.fm-rag .panel b:nth-child(4){animation-delay:2.2s}
+@keyframes fm-docOut{0%,20%{opacity:1;transform:translateX(0)}45%,60%{opacity:.15;transform:translateX(-6px)}90%,100%{opacity:1;transform:translateX(0)}}
+@keyframes fm-stream{0%,25%{opacity:0}40%,55%{opacity:1}70%,100%{opacity:0}}
+@keyframes fm-panelIn{0%,45%{box-shadow:0 0 0 0 rgba(34,211,238,0)}70%{box-shadow:0 0 18px 0 rgba(34,211,238,.35)}90%,100%{box-shadow:0 0 0 0 rgba(34,211,238,0)}}
+@keyframes fm-bar{0%,40%{height:0}70%,90%{height:var(--h)}100%{height:0}}
+
+/* ---------- Anomaly detection ---------- */
+.fm-anom .grid{display:grid;grid-template-columns:repeat(9,1fr);gap:9px;width:78%;height:70%;align-content:center}
+.fm-anom .dot{width:7px;height:7px;border-radius:50%;background:#1c2f52;justify-self:center}
+.fm-anom .dot.hot{animation:fm-hot 3s ease-in-out infinite}
+.fm-anom .scan{position:absolute;top:0;bottom:0;width:40%;background:linear-gradient(90deg,transparent,rgba(34,211,238,.14),transparent);animation:fm-scan 3s linear infinite}
+@keyframes fm-hot{0%,30%{background:#1c2f52;transform:scale(1);box-shadow:none}45%{background:var(--fm-amber);transform:scale(1.9);box-shadow:0 0 10px var(--fm-amber)}60%{background:var(--fm-red);transform:scale(1.6);box-shadow:0 0 10px var(--fm-red)}80%,100%{background:#1c2f52;transform:scale(1);box-shadow:none}}
+@keyframes fm-scan{0%{transform:translateX(-160%)}100%{transform:translateX(320%)}}
+
+/* ---------- File integrity seal (FIM) ---------- */
+.fm-seal svg{overflow:visible}
+.fm-seal .ring{fill:none;stroke:var(--fm-cyan);stroke-width:2;opacity:0;transform-origin:50px 50px;animation:fm-ring 3.4s ease-in-out infinite}
+.fm-seal .body{fill:none;stroke:var(--fm-cyan);stroke-width:3;stroke-dasharray:120;stroke-dashoffset:120;animation:fm-draw 3.4s ease-in-out infinite}
+.fm-seal .shackle{fill:none;stroke:var(--fm-cyan);stroke-width:3;stroke-linecap:round;stroke-dasharray:60;stroke-dashoffset:60;animation:fm-draw 3.4s ease-in-out infinite}
+.fm-seal .check{fill:none;stroke:var(--fm-green);stroke-width:3.4;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:26;stroke-dashoffset:26;animation:fm-check 3.4s ease-in-out infinite}
+@keyframes fm-draw{0%{stroke-dashoffset:var(--o,120)}30%,100%{stroke-dashoffset:0}}
+@keyframes fm-check{0%,55%{stroke-dashoffset:26;stroke:var(--fm-cyan)}75%,100%{stroke-dashoffset:0;stroke:var(--fm-green)}}
+@keyframes fm-ring{0%,55%{opacity:0;transform:scale(.6)}70%{opacity:.9;transform:scale(1)}100%{opacity:0;transform:scale(1.25)}}
+
+/* ---------- Chat waveform ---------- */
+.fm-wave .bars{display:flex;align-items:center;gap:5px;height:60%}
+.fm-wave .bars i{width:5px;border-radius:3px;background:linear-gradient(180deg,var(--fm-cyan),var(--fm-cyan-deep));filter:drop-shadow(0 0 5px rgba(34,211,238,.5));animation:fm-eq 1.4s ease-in-out infinite}
+@keyframes fm-eq{0%,100%{height:14%}50%{height:100%}}
+</content>
