@@ -1,17 +1,170 @@
+/* AIPCC design system.
+ *
+ * One rule governs this palette: COLOR IS A WARNING. The chrome — every
+ * surface, border, button and label — is strictly monochrome graphite. Chroma
+ * appears only where it encodes a severity or a state. An analyst scanning a
+ * table can therefore trust that anything coloured is telling them something,
+ * which is not true of a console that spends its accent colour on links.
+ *
+ * The type inverts the usual pairing: IBM Plex Mono is the *display* face
+ * (titles, section headers, every identifier), Plex Sans carries prose. This
+ * is a tool for reading machine output, so the machine's face leads.
+ */
+
 @import "tailwindcss";
 
-/* Dark "security console" base. The design system proper arrives in Phase 3. */
+/* Self-hosted, so the app has no CDN dependency and works offline in Docker. */
+@import "@fontsource-variable/ibm-plex-sans";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "@fontsource/ibm-plex-mono/600.css";
+@import "@fontsource/ibm-plex-mono/700.css";
+
 @theme {
-  --color-console-bg: #0a0e14;
-  --color-console-surface: #121821;
-  --color-console-border: #1f2937;
-  --color-console-text: #e5e7eb;
-  --color-console-muted: #9ca3af;
-  --color-console-accent: #22d3ee;
+  /* --- Chrome: monochrome only ------------------------------------------ */
+  --color-void: #0a0c10;
+  --color-surface: #0f131a;
+  --color-raised: #151a23;
+  --color-overlay: #1a202b;
+  --color-line: #1e2634;
+  --color-line-strong: #2b3545;
+  --color-ink: #e9ecf2;
+  --color-ink-dim: #98a2b3;
+  --color-ink-faint: #5f6a7c;
+
+  /* --- Chroma: severity and state only ---------------------------------- */
+  --color-critical: #ff5c6c;
+  --color-high: #fb8c3a;
+  --color-medium: #f4c24a;
+  --color-low: #45b8cd;
+  --color-info: #7e8aa0;
+  --color-ok: #46d890;
+
+  /* --- Type ------------------------------------------------------------- */
+  --font-sans: "IBM Plex Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+
+  /* Display sizes are mono, so they run wide — the scale is tighter than a
+     sans scale would be at the same visual weight. */
+  --text-display: 2rem;
+  --text-display--line-height: 1.15;
+  --text-display--letter-spacing: -0.03em;
+
+  --radius-xs: 3px;
+  --radius-sm: 5px;
+  --radius-md: 7px;
+  --radius-lg: 10px;
+
+  --shadow-panel: 0 1px 2px rgb(0 0 0 / 0.4), 0 8px 24px -12px rgb(0 0 0 / 0.6);
+  --shadow-pop: 0 4px 12px rgb(0 0 0 / 0.5), 0 16px 48px -16px rgb(0 0 0 / 0.7);
+
+  --animate-shimmer: shimmer 1.6s ease-in-out infinite;
+  --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+  --animate-rise: rise 0.32s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-fade: fade 0.2s ease-out both;
 }
 
-body {
-  background-color: var(--color-console-bg);
-  color: var(--color-console-text);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+@keyframes shimmer {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.7; }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.85); }
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@layer base {
+  * {
+    border-color: var(--color-line);
+  }
+
+  html {
+    color-scheme: dark;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: var(--color-void);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    font-size: 0.9375rem;
+    line-height: 1.55;
+  }
+
+  /* The focus ring is white, not an accent hue — a focus ring is not a
+     severity, and nothing in this UI is coloured unless it means something. */
+  :focus-visible {
+    outline: 2px solid var(--color-ink);
+    outline-offset: 2px;
+    border-radius: var(--radius-xs);
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--color-ink) 22%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--color-line-strong);
+    border: 3px solid transparent;
+    background-clip: content-box;
+    border-radius: 999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--color-ink-faint);
+    background-clip: content-box;
+  }
+}
+
+@layer components {
+  /* The eyebrow: uppercase mono at small size, used for every structural
+     label in the app (section names, field labels, table headers). It is the
+     connective tissue that makes the mono-as-display decision read as a
+     system rather than a one-off. */
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--color-ink-faint);
+  }
+
+  /* Identifiers — UUIDs, CVEs, MITRE ids, IPs, timestamps. Anything an
+     analyst would copy and paste into another tool. */
+  .ident {
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    letter-spacing: -0.01em;
+    color: var(--color-ink-dim);
+  }
+}
+
+/* The four feature animations ship with a cyan/amber default palette. Remap
+   them onto the severity ramp so they obey the same rule as everything else.
+   See components/motion/README.md. */
+.fm {
+  --fm-cyan: var(--color-low);
+  --fm-amber: var(--color-medium);
+  --fm-red: var(--color-critical);
+  --fm-green: var(--color-ok);
+  --fm-bg: var(--color-surface);
 }

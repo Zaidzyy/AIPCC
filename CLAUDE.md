@@ -63,11 +63,22 @@ backend/
   tests/                    # pytest
 frontend/
   public/video/             # optimized background clips + posters (see manifest.md)
+  eslint.config.js          # flat config; react-hooks rules are the ones that matter
   src/
+    index.css               # @theme tokens — the whole design system lives here
+    App.jsx                 # routes only
     components/motion/      # CSS/SVG feature animations (no deps)
-    components/ui/          # design system primitives
+    components/ui/          # design system primitives (Radix behaviour, own styling)
+    components/layout/      # AppShell, Sidebar, Topbar
+    components/common/      # PageHeader, SeveritySpine, AmbientVideo, IntroSequence
+    components/report/      # the five report section renderers
+    context/AuthContext.jsx # token + current user; the only source of "who am I"
+    hooks/queries.js        # every TanStack Query hook and its query keys
+    routes/                 # ProtectedRoute, AdminRoute
     pages/                  # one file per route
     lib/apiClient.js        # axios instance, JWT interceptor, 401 handling
+    lib/api/                # one module per backend router
+    lib/format.js           # severity + status tokens, date/byte formatting
 n8n/                        # workflow JSONs + IMPORT.md
 docker-compose.yml
 ```
@@ -151,20 +162,25 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–2 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–3 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
 Alembic migrations, explicit seed script, the ported RAG pipeline (ingest/chunk/embed/vectorstore),
-`docker-compose.yml` (postgres + backend + frontend + n8n), the frontend scaffold (Vite + React 19 +
-Router + Tailwind v4 + TanStack Query) with one placeholder route, **report generation with a single
+`docker-compose.yml` (postgres + backend + frontend + n8n), report generation with a single
 canonical schema, concurrent sections, validation + one repair retry, an `LLMProvider` abstraction,
-the document/report endpoints n8n calls, and OAuth2 password-flow auth with bcrypt, JWT and
-role-gated, ownership-scoped endpoints.**
+the document/report endpoints n8n calls, OAuth2 password-flow auth with bcrypt, JWT and
+role-gated, ownership-scoped endpoints, **a persisted RAG chat over ingested documents, and the
+full React SPA — nine routes behind a single app shell, a Radix-based design system, and every
+server read going through TanStack Query.** 143 backend tests pass; `npm run lint` is clean.
 
-Not yet built: real pages (Phase 3), dashboard (4), n8n wiring (5), export (6), polish (7).
+Not yet built: dashboard aggregate endpoints (Phase 4), n8n wiring (5), export (6), polish (7).
+The dashboard route exists and shows real counts computed from `/reports` and `/documents`; it does
+not yet have server-side aggregation.
 
 Seed credentials: `admin@aipcc.io` / `admin` (`python -m app.db.seed`).
+Add `--ingest` to embed the sample CSV — without it the document is registered but has no chunks,
+and report generation fails with "no indexed content for document …".
 
 ### Decisions taken in Phase 0
 
@@ -213,6 +229,71 @@ Seed credentials: `admin@aipcc.io` / `admin` (`python -m app.db.seed`).
 - **`JWT_SECRET` must be ≥32 bytes outside `local`**, and the dev default is refused there — HS256
   wants at least that (RFC 7518 §3.2) and PyJWT warns below it.
 - **Admins cannot demote, deactivate or delete themselves**, so the last admin can't lock everyone out.
+
+### Decisions taken in Phase 3
+
+**Chat backend** (Phase 3 needed a `/chat` page and `chatbot.py` had never been ported):
+
+- **`services/chatbot.py` takes plain values and returns plain values** — no DB session, no vector
+  store handle, no hidden history query. The prototype's `answer_prompt` did all three plus the LLM
+  call inside one bare `except`, so a retrieval bug and a provider outage both surfaced as
+  `(chat_id, None)`. Persistence lives in the router; the service is testable with neither Postgres
+  nor Chroma.
+- **The `Chat` / `Message` tables already existed and were unused**, so conversations are persisted
+  rather than stateless.
+- **Retrieval is scoped per attached document**, and each chunk comes back as a cited `Source`. A
+  chat with nothing attached retrieves nothing rather than searching every document in the store.
+- **The question is committed before the provider is called.** An outage loses the answer but never
+  the question; the turn is marked `failed` and the route returns 502.
+- **Chat names are derived from the first message locally.** The prototype spent a second LLM round
+  trip on this, so a provider hiccup could fail chat *creation*.
+
+**Frontend:**
+
+- **Colour is a warning.** The chrome is strictly monochrome graphite; chroma appears only where it
+  encodes a severity or a state. That is why the primary button is white rather than an accent hue,
+  and why the focus ring is white. Anything coloured in this UI is telling the analyst something.
+- **The type pairing is inverted:** IBM Plex Mono is the *display* face (titles, section headers,
+  every identifier), Plex Sans carries prose. Fonts are self-hosted via `@fontsource`, so there is
+  no CDN dependency and the app works offline in Docker.
+- **Radix primitives, own styling.** `components/ui/` wraps Radix for the behaviour that is easy to
+  get wrong (focus trapping, roving tabindex, dismiss) and writes every visual decision here, rather
+  than adopting a generated component library's default look.
+- **Never build a class name at runtime.** Tailwind generates utilities by scanning source *text*, so
+  a class produced by concatenation or `.replace()` silently never gets a rule. Severity classes are
+  written out in full in `lib/format.js`. This was a live bug: `border-critical/60` was assembled
+  with `.replace("/35", "/60")` and every severity rule rendered in the default border colour.
+- **Do not name a theme colour `canvas`.** It collides with the CSS system-colour keyword and
+  Tailwind silently emits no utility and no variable for it. The base surface token is `--color-void`.
+- **`get_current_user` has a frontend equivalent:** `AuthContext` is the only place a component
+  learns who is calling, and the current user is fetched through TanStack Query keyed on the token —
+  not by an ad-hoc effect.
+- **A 401 on any request except `/auth/login` clears the token and dispatches an event** that the
+  auth context listens for, so the redirect goes through the router instead of a page reload. Login
+  is excluded because a 401 there is a form error, not a dead session.
+- **Empty is not the same as failed.** Every list view distinguishes loading, empty, error and
+  "filtered to nothing", and a report's `errors[]` renders as "these sections could not be
+  generated" rather than as silently absent sections.
+- **Nothing in the UI is faked.** The topbar status dot polls the real `/health/db`; Settings shows
+  the real API base URL; the Profile page is read-only because no update endpoint exists. The
+  dashboard says plainly which numbers are client-side counts.
+- **Video obeys `public/video/manifest.md`.** `AmbientVideo` enforces the poster, the muted/looping
+  autoplay, `preload="none"`, the readability scrim and pausing off-screen. Rule 1 — never two
+  moving things at once — is a routing decision: the Generate page unmounts the `object-core` panel
+  before the `loading-ring` state mounts. The intro's reduced-motion gate is the app's only one.
+- **`eslint.config.js` was missing** even though `npm run lint` was in package.json from Phase 0, so
+  the command had never once run. It needs `react/jsx-uses-vars`, or every component referenced only
+  from JSX reads as an unused variable.
+
+**Backend fix found while wiring the frontend:**
+
+- **`env_file` is anchored to absolute paths.** A bare `".env"` resolves against the working
+  directory, so the documented `cd backend && uvicorn app.main:app` silently ignored the `.env` at
+  the repo root — where `.env.example` lives and where docker compose reads it — and generation
+  failed with "provider unreachable" for no visible reason.
+- **`cors_origins` needs `NoDecode`.** pydantic-settings runs `json.loads()` on complex types
+  *before* field validators, so the comma-separated form documented in `.env.example` raised a
+  `SettingsError` at import.
 
 ### n8n workflows
 
