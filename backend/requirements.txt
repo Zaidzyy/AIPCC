@@ -37,6 +37,15 @@ langchain-chroma>=0.1.4,<1.0
 sentence-transformers>=3.3,<6.0
 chromadb>=0.5.20,<2.0
 
+# --- Export (Phase 6) ---
+# Both are pure-Python wheels with no system libraries behind them. That is the
+# selection criterion: WeasyPrint and pdfkit render nicer HTML but need GTK or
+# wkhtmltopdf installed on the host, which would break "clone and
+# docker compose up" on a reviewer's machine for the sake of a prettier CSS box
+# model. ReportLab draws the PDF directly and ships wheels for every platform.
+python-docx>=1.1,<2.0
+reportlab>=4.2,<5.0
+
 # --- Tests ---
 pytest>=8.3,<9.0
 httpx>=0.28,<1.0

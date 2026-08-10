@@ -451,7 +451,13 @@ TIMELINE_EVENTS = [
     ("Containment applied to affected hosts", "soc-console", "04:15"),
 ]
 
-CLASSIFICATIONS = ["Internal", "Confidential", "Restricted"]
+# Drawn from the closed vocabulary the API enforces — see
+# `schemas/report.CLASSIFICATIONS`. Weighted rather than uniform so a seeded
+# database looks like a real one: most work is Internal, a Confidential report
+# is the exception that makes the share-link override worth demonstrating, and
+# a Public one exists so the share dialog has something uncontroversial to
+# share.
+CLASSIFICATIONS = ["Internal", "Internal", "Internal", "Confidential", "Public"]
 
 # Enrichment the n8n orchestrator would have produced: AbuseIPDB reputation for
 # the IPs its indicator-extraction pass found, plus its own IOC classification.

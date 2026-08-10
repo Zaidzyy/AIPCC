@@ -9,14 +9,16 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from app.api.deps import authorize_owner, get_current_user, is_admin
+from app.api.responses import as_download
 from app.db import models
 from app.db.session import get_db
 from app.schemas.report import (
+    ClassificationUpdate,
     GenerateReportRequest,
     IntegrityUpdate,
     ReportDetail,
@@ -24,6 +26,7 @@ from app.schemas.report import (
     ReportSummary,
     StoreGeneratedReportRequest,
 )
+from app.services import export
 from app.services.report import generate_report
 from app.services.report_storage import load_report_detail, store_report
 
@@ -159,6 +162,54 @@ def get_report_status(
 ) -> ReportStatusResponse:
     report = _get_authorized_report(db, user, report_id)
     return ReportStatusResponse.model_validate(report)
+
+
+@router.get(
+    "/reports/{report_id}/export",
+    response_class=Response,
+    responses={200: {"content": {media: {} for media in export.MEDIA_TYPES.values()}}},
+)
+def export_report(
+    report_id: uuid.UUID,
+    format: export.ExportFormat = "pdf",
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> Response:
+    """Render this report as a document an analyst can hand to someone.
+
+    Ownership is the same rule every other report route uses. Classification is
+    not a restriction here — the owner is allowed their own report in any
+    format — but it is stamped on every page of what comes back, because that
+    caveat has to travel with the file once it leaves this system.
+    """
+    report = _get_authorized_report(db, user, report_id)
+    detail = load_report_detail(db, report)
+    source = export.source_from_detail(
+        detail, document_name=report.document.document_name if report.document else None
+    )
+    return as_download(export.render(source, format))
+
+
+@router.patch("/reports/{report_id}/classification", response_model=ReportSummary)
+def set_classification(
+    report_id: uuid.UUID,
+    request: ClassificationUpdate,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> ReportSummary:
+    """Reclassify a report.
+
+    Existing share links are deliberately *not* revoked here. `resolve_share`
+    re-reads the classification on every open, so raising a report to
+    Confidential stops its links working immediately and lowering it again
+    restores them — which is the behaviour somebody who reclassified by mistake
+    expects. Revoking on write would silently destroy links instead.
+    """
+    report = _get_authorized_report(db, user, report_id)
+    report.classification = request.classification
+    db.commit()
+    db.refresh(report)
+    return ReportSummary.model_validate(report)
 
 
 @router.get("/reports/{report_id}", response_model=ReportDetail)

@@ -12,8 +12,11 @@ Two things are normalised here rather than at the edges:
    the field is nullable, so a model will still answer "Severe", "Med" or
    nothing at all. `severity_bucket` folds those into the canonical ladder
    inside SQL, so the chart never gets a slice called "Med." that is really the
-   same thing as "Medium". The ladder mirrors `severityToken` in
-   `frontend/src/lib/format.js` — same buckets, same prefix rules.
+   same thing as "Medium". The ladder itself lives in `services/severity.py`
+   and the `CASE` below is generated from it, so the dashboard and the exporter
+   cannot drift apart about what "Sev 1" means. `severityToken` in
+   `frontend/src/lib/format.js` is the third runtime and stays a hand copy — a
+   browser cannot import Python.
 2. **Empty days.** A day with no reports must come back as a zero, not be
    absent. A line chart that silently closes the gap between two distant dates
    draws a trend that did not happen.
@@ -35,31 +38,25 @@ from app.schemas.dashboard import (
     ReportBucket,
     SeveritySlice,
 )
-
-# Ordered low → critical so a stacked chart reads bottom-up in severity order.
-SEVERITY_ORDER = ("unknown", "low", "medium", "high", "critical")
+from app.services.severity import SEVERITY_ORDER, SEVERITY_PREFIXES, UNKNOWN
 
 # Report states that mean "an analyst still has to look at this".
 ATTENTION_STATES = ("failed", "partial")
+
+__all__ = ["SEVERITY_ORDER", "ATTENTION_STATES", "severity_bucket"]
 
 
 def severity_bucket(column):
     """Fold a free-text severity into the canonical ladder, inside SQL.
 
-    Prefix matching rather than equality: "Critical.", "critical risk" and
-    "CRITICAL" are the same finding, and refusing to see that understates the
-    number the dashboard exists to show.
+    The `WHEN` arms are generated from `services.severity.SEVERITY_PREFIXES`
+    rather than restated here, so adding a spelling the models produce updates
+    the dashboard and the exported document in one edit.
     """
     normalized = func.lower(func.trim(func.coalesce(column, "")))
     return case(
-        (normalized.like("crit%"), "critical"),
-        (normalized.like("sev%"), "critical"),
-        (normalized.like("high%"), "high"),
-        (normalized.like("med%"), "medium"),
-        (normalized.like("mod%"), "medium"),
-        (normalized.like("low%"), "low"),
-        (normalized.like("info%"), "low"),
-        else_="unknown",
+        *((normalized.like(f"{prefix}%"), name) for prefix, name in SEVERITY_PREFIXES),
+        else_=UNKNOWN,
     )
 
 

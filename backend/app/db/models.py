@@ -156,6 +156,9 @@ class Report(Base):
     alerts: Mapped[list[SecurityAlert]] = relationship(
         back_populates="report", cascade="all, delete-orphan"
     )
+    shares: Mapped[list[ReportShare]] = relationship(
+        back_populates="report", cascade="all, delete-orphan"
+    )
 
 
 class AttackType(Base):
@@ -325,6 +328,57 @@ class SecurityAlert(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     report: Mapped[Report | None] = relationship(back_populates="alerts")
+
+
+class ReportShare(Base):
+    """A read-only share link for one report — see `core/share_token.py`.
+
+    Only the SHA-256 of the token is stored, so a leaked database row cannot be
+    replayed as a link. `prefix` is the clear, uniquely indexed lookup component.
+
+    Revocation and expiry are both recorded here rather than implied, because
+    both have to be enforced on the read path: a link that the UI has stopped
+    listing is not a link that has stopped working.
+
+    `classification_at_share` and `override_justification` are the audit trail
+    for sharing a Confidential report. The justification is the override —
+    `resolve_share` treats its presence as the recorded permission, so a report
+    later raised to Confidential does not silently keep serving links that were
+    issued when it was Internal.
+    """
+
+    __tablename__ = "report_shares"
+
+    share_id: Mapped[uuid.UUID] = _pk()
+    report_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reports.report_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # Who issued the link. Not exposed on the public view — see
+    # `schemas/share.py` on why a share leaks no identity.
+    created_by: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    prefix: Mapped[str] = mapped_column(String(32), nullable=False, unique=True, index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    label: Mapped[str | None] = mapped_column(String(120))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    # Null means the link does not expire. Revocation is then the only way to
+    # retire it, which is why revocation exists rather than a shorter default.
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default="false"
+    )
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_viewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    view_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default="0"
+    )
+    classification_at_share: Mapped[str] = mapped_column(String(50), nullable=False)
+    override_justification: Mapped[str | None] = mapped_column(Text)
+
+    report: Mapped[Report] = relationship(back_populates="shares")
 
 
 class ApiKey(Base):

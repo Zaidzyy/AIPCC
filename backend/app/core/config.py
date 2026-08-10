@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     # --- Uploads -----------------------------------------------------------
     upload_dir: Path = BACKEND_DIR / "uploads"
 
+    # --- Sharing -----------------------------------------------------------
+    # Where a share link points. This is the *frontend* origin, not the API's:
+    # a share URL is opened by a person in a browser, and the page they land on
+    # is a React route. Set it to the deployed origin in production or every
+    # link the app hands out will point at somebody's localhost.
+    share_base_url: str = "http://localhost:5173"
+
     # --- CORS --------------------------------------------------------------
     # NoDecode is required. For complex types pydantic-settings tries
     # json.loads() on the raw env value *before* field validators run, so the

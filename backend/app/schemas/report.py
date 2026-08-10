@@ -19,7 +19,7 @@ from __future__ import annotations
 import json
 import uuid
 from datetime import datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, get_args
 
 from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
@@ -241,13 +241,39 @@ class IntegrityUpdate(BaseModel):
     observed_hash: str | None = Field(default=None, max_length=64)
 
 
+# --- Classification -------------------------------------------------------
+
+# The handling caveat a report carries: who this may be shown to. It is printed
+# on every page of an export and it is what the share layer consults before it
+# will hand a report to an unauthenticated reader.
+#
+# Three levels, deliberately — a ladder an analyst can hold in their head beats
+# a taxonomy nobody applies consistently. The prototype's fourth level,
+# "Restricted", sat between Confidential and nothing: it had no rule attached to
+# it, so it meant whatever the reader assumed. A level with no consequence is
+# decoration.
+Classification = Literal["Public", "Internal", "Confidential"]
+CLASSIFICATIONS: tuple[str, ...] = get_args(Classification)
+DEFAULT_CLASSIFICATION = "Internal"
+
+# Which levels a share link may expose without an explicit override. See
+# `app.services.share` — this is the vocabulary, that module is the rule.
+FREELY_SHAREABLE: frozenset[str] = frozenset({"Public", "Internal"})
+
+
+class ClassificationUpdate(BaseModel):
+    """Body of PATCH /reports/{report_id}/classification."""
+
+    classification: Classification
+
+
 # --- API request / response ----------------------------------------------
 
 
 class GenerateReportRequest(BaseModel):
     document_id: uuid.UUID
     report_name: str = Field(min_length=1, max_length=255)
-    classification: str = "Internal"
+    classification: Classification = DEFAULT_CLASSIFICATION
 
 
 class ReportStatusResponse(BaseModel):
@@ -268,6 +294,11 @@ class ReportSummary(BaseModel):
     report_name: str
     document_id: uuid.UUID
     user_id: uuid.UUID
+    # `str` on the way out, `Classification` on the way in — the same asymmetry
+    # `UserPublic.email` uses, for the same reason. Rows written before this
+    # vocabulary was closed carry values outside it; re-validating on output
+    # would make one such row raise inside `GET /reports` and take the listing
+    # down for every report the caller owns.
     classification: str
     status: str
     generated_at: datetime | None = None
@@ -295,7 +326,7 @@ class StoreGeneratedReportRequest(BaseModel):
 
     document_id: uuid.UUID
     report_name: str = Field(min_length=1, max_length=255)
-    classification: str = "Internal"
+    classification: Classification = DEFAULT_CLASSIFICATION
     sections: ReportSections
     # The orchestrator's AbuseIPDB reputation and IOC classification pass.
     # Optional: a report generated without enrichment is still a valid report.

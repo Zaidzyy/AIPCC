@@ -18,6 +18,7 @@ from app.api.routers import (
     documents,
     health,
     reports,
+    shares,
     users,
 )
 from app.core.config import settings
@@ -44,6 +45,7 @@ def create_app() -> FastAPI:
     app.include_router(users.router)
     app.include_router(documents.router)
     app.include_router(reports.router)
+    app.include_router(shares.router)
     app.include_router(chat.router)
     app.include_router(dashboard.router)
     app.include_router(alerts.router)

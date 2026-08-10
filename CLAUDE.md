@@ -431,4 +431,77 @@ absent from its final tree — `git show` recovers it as reference material.
   `frontend/src/components/motion/motion.css` since Phase 3, producing a CSS syntax warning on every
   build. Removed.
 
+### Decisions taken in Phase 6 — backend
+
+**Export:**
+
+- **One document model, two renderers.** `services/export/layout.py` turns a report into headings,
+  labelled paragraphs and table rows; `pdf_writer` and `docx_writer` walk that and never read a
+  report field. So the PDF and the DOCX cannot disagree about content — only about typography — and
+  a new report field is added in one place instead of two.
+- **Narrative sections are findings, enumerative sections are tables.** Attack types, risks and
+  vulnerabilities carry paragraphs of prose; a six-column table of paragraphs is unreadable on
+  paper at any width. Anomalies, timeline and threat intel are short and are read down the column.
+- **Null fields are dropped from a finding and dashed in a table.** On screen a `—` sits in a dense
+  grid and reads as "nothing here"; printed as its own labelled paragraph it reads as a defect. A
+  table keeps its grid either way, so there a gap has to be visibly a gap.
+- **`python-docx` + `reportlab`, both pure-Python wheels.** WeasyPrint would let the export reuse
+  the app's CSS but needs GTK on the host, which breaks "clone and `docker compose up`" for the sake
+  of a nicer box model.
+- **The print palette is the inverse of the app's, not a copy.** The UI's hues are tuned to glow on
+  near-black and go muddy on white. What carries over is the rule: chroma only where it means
+  something — a severity, or a classification.
+- **The severity ladder now lives in `services/severity.py`** and `analytics.severity_bucket`
+  *generates its SQL `CASE` from it*. It had been written twice; a third copy for the exporter was
+  the point where they would drift. `format.js` stays a hand copy — a browser cannot import Python.
+- **Model output is escaped in both writers.** ReportLab treats a `Paragraph` as markup and DOCX is
+  XML, so an LLM emitting `<b>` or `&` is a rendering failure in one and an injection in the other.
+- **A section never starts in the last 30 mm of a page** (`CondPageBreak`). A heading stranded above
+  its content reads as a document that ran out of room. `KeepTogether` cannot fix it — the heading
+  and the first table row are separate flowables.
+- **The DOCX uses Word's built-in styles and real `PAGE`/`NUMPAGES` fields.** A DOCX is an editable
+  deliverable; it will be pasted into a longer write-up, so it should inherit the recipient's
+  template and keep working page numbers rather than arriving as fifty hard-styled paragraphs.
+
+**Classification:**
+
+- **Three levels, not four.** `Public | Internal | Confidential`, closed on input in
+  `schemas/report.Classification`. The prototype's "Restricted" sat between Confidential and nothing
+  with no rule attached to it, so it meant whatever the reader assumed. The migration folds existing
+  `Restricted` rows *up* to Confidential.
+- **`Classification` on the way in, `str` on the way out.** Same asymmetry as `UserPublic.email`,
+  for the same reason: one historical row outside the vocabulary would raise inside `GET /reports`
+  and take the listing down for every report the caller owns.
+- **Reclassifying does not revoke links.** `resolve_share` re-reads the classification on every
+  open, so raising a report to Confidential kills its links immediately and lowering it restores
+  them. Revoking on write would silently destroy links a mistake could otherwise undo.
+
+**Share links:**
+
+- **A share token is a capability, not a credential.** It never reaches `get_current_user`; it is
+  only read from the path of `/share/{token}`, and the routes that accept it read exactly one row.
+  A JWT for the owning user would mean a link forwarded to a contractor carries the whole account.
+- **It deliberately does not reuse `core/api_key.py`.** The two look alike, but an API key answers
+  "which principal is calling" and a share token answers "may this request see this row". Merging
+  them would put the capability into the `Authorization` header, one `looks_like_*` bug away from
+  being treated as an identity. The `shr_` namespace cannot collide with `aipcc_`.
+- **`SharedReport` is built by listing what may be exposed, not by stripping `ReportDetail`.**
+  Inheriting and deleting fields means the next field added leaks by default. No `user_id`, no
+  `report_id`, no `document_id`, no sealed hash, no owner address.
+- **Three refusals, three codes, on purpose.** Unknown *and revoked* → 404 with an identical body:
+  revocation usually answers a leak, and must not confirm to whoever leaked it that they held
+  something real. Expired → 410 with the date, because that holder was given the link legitimately
+  and needs "ask for a new one", not "the app is broken". Classification → 403, a policy answer.
+- **Classification is enforced on read, not only on create.** The link holder never loads the UI
+  that would hide a button, so anything checked only at creation time is not enforced at all.
+- **The justification *is* the override.** No boolean: a checkbox records that somebody clicked, a
+  sentence records that somebody decided. It is stored on the share and it raises a `share-link`
+  security alert owned by the report's owner — an override that lives only in a column nobody
+  queries is not oversight.
+- **`require_human` guards the owner routes**, as it does `/api-keys`. A leaked machine key must not
+  be able to mint a link and walk a report out of the system.
+- **A report belongs to its document's owner, and a share belongs to its report** — Phase 5's rule,
+  unchanged. Revocation is authorized through the report, not through `created_by`, so an admin can
+  kill a link on somebody else's report.
+
 **Update this section at the end of every phase.**
