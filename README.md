@@ -9,7 +9,8 @@ Ingest a security log. Get a structured, cited, validated incident report — an
 </p>
 
 ![The AIPCC dashboard: KPI strip, reports-generated volume, findings by severity, top attack types](docs/images/dashboard.jpg)
-*A fresh `docker compose up` with the demo seed: 47 reports, 55 critical findings, and — the tile that matters — **10 needs attention**, reports that came back partial or failed. Nothing here is a placeholder; every figure is a SQL `GROUP BY` over real rows, and a failed aggregate renders as `—` rather than `0`, because "I could not read this" and "there are none" are the one pair of states a security dashboard must never confuse.*
+*A fresh `docker compose up` with the demo seed: 47 reports, 55 critical findings, and — the tile that matters — **10 needs attention**, reports that came back partial or failed. Every figure is a SQL `GROUP BY` over real rows, and a failed aggregate renders as `—` rather than `0`: "I could not read this" and "there are none" must never look alike on a security dashboard.*
+
 
 AIPCC takes a security log (CSV / JSON / TXT / LOG), embeds it into a vector
 store, and generates a five-section incident report — **attack types** (MITRE
