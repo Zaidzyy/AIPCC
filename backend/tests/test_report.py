@@ -36,7 +36,6 @@ from app.services.report_storage import (
     store_report,
 )
 
-
 # --- Fakes ----------------------------------------------------------------
 
 

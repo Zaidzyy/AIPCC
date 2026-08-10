@@ -1,0 +1,64 @@
+# Lint configuration.
+#
+# `ruff check` only — `ruff format` is deliberately not part of CI. The
+# formatter would rewrap every docstring and comment in this codebase, and the
+# comments here carry most of the reasoning; a reformat that turns a paragraph
+# explaining a bug into differently-wrapped lines is a large diff that hides
+# real ones. Formatting is consistent because it was written that way.
+
+line-length = 100
+target-version = "py311"
+
+[lint]
+select = [
+    "E",    # pycodestyle
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes — unused imports and names, the ones that actually rot
+    "I",    # import sorting
+    "B",    # flake8-bugbear — mutable defaults, loop-variable capture
+    "UP",   # pyupgrade — no legacy typing syntax on a 3.11 floor
+    "C4",   # comprehensions
+    "SIM",  # obvious simplifications
+    "RUF",  # ruff's own checks
+]
+ignore = [
+    # `raise ... from err` inside an `except`. Every place that matters already
+    # chains; enforcing it on the handful that deliberately swallow a provider
+    # error would only add noise.
+    "B904",
+    # `timezone.utc` rather than the 3.11 `UTC` alias. Both are correct; the
+    # long form is what the ported code and every migration already use, and
+    # rewriting 25 call sites to save four characters is churn, not cleanup.
+    "UP017",
+    # Ambiguous unicode in strings. This codebase writes "—" and "→" in
+    # user-facing text on purpose.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+]
+
+[lint.flake8-bugbear]
+# `def route(user = Depends(get_current_user))` is FastAPI's whole dependency
+# mechanism, not the mutable-default bug B008 exists to catch. Naming the
+# callables rather than switching B008 off keeps the check working everywhere
+# else — including on a real `def f(x=[])`.
+extend-immutable-calls = [
+    "fastapi.Body",
+    "fastapi.Depends",
+    "fastapi.File",
+    "fastapi.Form",
+    "fastapi.Path",
+    "fastapi.Query",
+]
+
+[lint.per-file-ignores]
+# Fixture rows, one per line. Wrapping a tuple of eight fields across four
+# lines makes a table of demo data unreadable as a table.
+"app/db/demo_data.py" = ["E501"]
+# Alembic revisions are generated, and their `Union[str, None]` headers are
+# the tool's own template rather than this project's style.
+"alembic/versions/*" = ["UP007", "UP045", "I001", "E501"]
+"alembic/env.py" = ["I001", "E402"]
+# Tests import fixtures and models they only reference inside assertions, and
+# they read better with long, literal expectation strings on one line.
+"tests/*" = ["E501"]

@@ -53,7 +53,7 @@ class _StubStore:
         self.hits_by_document = hits_by_document
         self.filters: list[dict] = []
 
-    def similarity_search(self, query, k, filter):  # noqa: A002 - Chroma's name
+    def similarity_search(self, query, k, filter):
         self.filters.append(filter)
         return [_StubHit(c) for c in self.hits_by_document.get(filter["document_id"], [])]
 

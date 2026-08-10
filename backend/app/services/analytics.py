@@ -43,7 +43,7 @@ from app.services.severity import SEVERITY_ORDER, SEVERITY_PREFIXES, UNKNOWN
 # Report states that mean "an analyst still has to look at this".
 ATTENTION_STATES = ("failed", "partial")
 
-__all__ = ["SEVERITY_ORDER", "ATTENTION_STATES", "severity_bucket"]
+__all__ = ["ATTENTION_STATES", "SEVERITY_ORDER", "severity_bucket"]
 
 
 def severity_bucket(column):

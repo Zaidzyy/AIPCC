@@ -34,16 +34,22 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+    # The whole .env is passed in, rather than each variable being restated
+    # here. Enumerating them meant every new setting had to be added in two
+    # places, and forgetting the second one produced a container silently
+    # running on defaults. `environment:` below still wins, so the handful of
+    # values that must differ inside the container are pinned.
+    env_file:
+      - path: .env
+        required: false
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-aipcc}:${POSTGRES_PASSWORD:-aipcc}@postgres:5432/${POSTGRES_DB:-aipcc}
+      # Absolute, and matching the volume mounts below. The .env default is a
+      # host path and would resolve to a throwaway directory inside the image.
       CHROMA_DIR: /app/chroma_langchain_db
       UPLOAD_DIR: /app/uploads
       CORS_ORIGINS: http://localhost:5173
-      LLM_PROVIDER: ${LLM_PROVIDER:-gemini}
-      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
-      JWT_SECRET: ${JWT_SECRET:-dev-only-change-me}
+      SHARE_BASE_URL: http://localhost:5173
       ENVIRONMENT: local
     ports:
       - "8000:8000"
@@ -52,17 +58,39 @@ services:
       - chroma_data:/app/chroma_langchain_db
       - uploads_data:/app/uploads
     # Migrations run here — never schema creation from application code.
+    #
+    # Seeding runs here too, which is a deliberate exception to "never on
+    # startup". `seed.py` is idempotent — it prints "already present" and does
+    # nothing on every boot after the first — and hard rule #1 is about *schema*
+    # creation, which still only ever happens through Alembic. The alternative
+    # is a reviewer running `docker compose up`, reaching a login form, and
+    # having no credentials: the app would be running and unusable.
     command: >
       sh -c "alembic upgrade head &&
+             python -m app.db.seed --demo --ingest &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health/db || exit 1"]
+      interval: 10s
+      timeout: 5s
+      # Generous: the first boot runs migrations and embeds the sample log
+      # before uvicorn binds.
+      retries: 30
+      start_period: 60s
     restart: unless-stopped
 
   frontend:
     build: ./frontend
     container_name: aipcc-frontend
     depends_on:
-      - backend
+      # Only `service_started`: Vite serves the SPA whether or not the API is
+      # up, and the app already distinguishes "loading" from "cannot reach the
+      # API". Waiting for a healthy backend would hold the UI back through the
+      # first-boot migration and embedding for no benefit.
+      backend:
+        condition: service_started
     environment:
+      # The *browser* resolves this, not the container, so it is a host URL.
       VITE_API_BASE_URL: http://localhost:8000
     ports:
       - "5173:5173"

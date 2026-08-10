@@ -71,6 +71,7 @@ backend/
 frontend/
   public/video/             # optimized background clips + posters (see manifest.md)
   eslint.config.js          # flat config; react-hooks rules are the ones that matter
+  vite.config.js            # app build *and* Vitest, so both resolve `@/` identically
   src/
     index.css               # @theme tokens — the whole design system lives here
     App.jsx                 # routes only
@@ -88,7 +89,9 @@ frontend/
     lib/apiClient.js        # axios instance, JWT interceptor, 401 handling
     lib/api/                # one module per backend router
     lib/format.js           # severity + status tokens, date/byte formatting
+    test/                   # setup.js (jsdom shims) + utils.jsx (renderWithProviders)
 n8n/                        # workflow JSONs + IMPORT.md
+.github/workflows/ci.yml    # backend lint+migrate+pytest, frontend lint+test+build
 docker-compose.yml
 ```
 
@@ -97,25 +100,36 @@ docker-compose.yml
 ## Commands
 
 ```bash
-# Full stack (primary path)
-docker compose up                  # backend + frontend + postgres + n8n
-docker compose up postgres -d      # just the DB
+# Full stack — the only two commands a reviewer needs
+cp .env.example .env
+docker compose up                  # postgres + backend + frontend + n8n
+# → http://localhost:5173, admin@aipcc.io / admin
+# The backend container runs `alembic upgrade head` then `seed --demo --ingest`
+# before uvicorn binds. Both are idempotent; the second boot is a no-op.
 
-# Backend
+docker compose up postgres -d      # just the DB, to run the backend on the host
+docker compose exec backend pytest # the suite, without a local Python
+
+# Backend (on the host)
 cd backend
 uvicorn app.main:app --reload
 alembic upgrade head               # apply migrations
 alembic revision --autogenerate -m "msg"
-python -m app.db.seed              # seed demo data (never automatic)
+python -m app.db.seed              # seed demo data
 python -m app.db.seed --demo       # + six weeks of deterministic demo reports
+python -m app.db.seed --ingest     # + embed the sample CSV (needed to generate)
 python -m app.db.seed --service-token  # + an API key for the n8n workflows (shown once)
 python -m app.db.seed --reset --demo   # wipe seeded users first, then re-seed
 pytest
+ruff check app tests               # lint; config in backend/ruff.toml
 
 # Frontend
 cd frontend
-npm install
+npm ci
 npm run dev
+npm test                           # Vitest + Testing Library
+npm run lint
+npm run build
 ```
 
 ---
@@ -130,6 +144,9 @@ npm run dev
 - **Every new endpoint gets a test.** Minimum: happy path + auth rejection.
 - **Frontend server state goes through TanStack Query.** No `fetch` in components.
 - **Absolute imports** in frontend via `@/` alias.
+- **CI is the arbiter of "works".** `.github/workflows/ci.yml` runs backend lint + migrations +
+  pytest against a Postgres service container, and frontend lint + Vitest + build — all from a
+  clean checkout with none of this machine's state.
 
 ---
 
@@ -174,7 +191,9 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–6 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–6 complete; Phase 7 part 1 (reproducibility, tests, CI, cleanup) complete — README and
+screenshots deliberately not written yet.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase
+sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
@@ -192,10 +211,14 @@ threat-intel enrichment persisted alongside reports, and both workflow JSONs cor
 the real endpoints with auth attached,
 **and report export to PDF and DOCX from one format-independent layout, a closed
 `Public | Internal | Confidential` classification enforced at the API, and revocable, expiring,
-read-only share links with a public route outside the authenticated shell.** 318 backend tests
-pass; `npm run lint` is clean.
+read-only share links with a public route outside the authenticated shell,
+**and a one-command `docker compose up` verified from empty volumes, 30 Vitest/Testing-Library
+frontend tests, and a GitHub Actions pipeline running backend lint + migrations + pytest against a
+Postgres service container alongside frontend lint + tests + build.** 318 backend tests and 30
+frontend tests pass; `ruff check` and `npm run lint` are both clean with no warnings.
 
-Not yet built: polish (Phase 7). The n8n workflow JSONs are corrected and their
+Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
+verified manually. The n8n workflow JSONs are corrected and their
 endpoint contracts are covered by tests and verified against a running backend with a real service
 key, but the workflows themselves have not been executed inside n8n — that needs live Groq,
 AbuseIPDB and VirusTotal credentials. See `n8n/IMPORT.md` > Verification status.
@@ -547,5 +570,71 @@ absent from its final tree — `git show` recovers it as reference material.
 - **The demo seed emitted a fourth classification.** `--demo` wrote "Restricted", which the closed
   vocabulary does not contain; the migration folds those rows up to Confidential and the seed now
   draws from a weighted list of the three real levels.
+
+### Decisions taken in Phase 7 — reproducibility, tests, CI
+
+**One-command run** — verified by actually doing it: containers removed, fresh volumes, only
+`cp .env.example .env`, and the result was a logged-in dashboard with 44 reports.
+
+- **The stack seeds itself on first boot**, and that is a deliberate exception, not a lapse. Hard
+  rule #1 is about *schema* creation, which still only ever happens through Alembic; `seed.py` is
+  idempotent and prints "already present" on every boot after the first. The alternative is a
+  reviewer running `docker compose up`, reaching a login form and having no credentials — an app
+  that is running and unusable.
+- **The embedding model is baked into the backend image.** Otherwise the first ingest downloads
+  MiniLM from Hugging Face *after* the build, so `docker compose up` keeps a network dependency and
+  fails behind a rate limit with a stack trace instead of a report. ~90 MB on a 3.3 GB image.
+- **`env_file` replaces the enumerated `environment:` block.** Restating each variable in
+  docker-compose.yml meant every new setting had to be added in two places, and forgetting the
+  second produced a container silently running on defaults. `environment:` still wins, so the four
+  values that must differ inside the container are pinned there and nothing else is.
+- **`.env.example` now boots the stack unedited.** `JWT_SECRET=` was empty, which is
+  present-but-empty rather than absent, so the config default never applied; `LLM_TEMPERATURE` said
+  0.7, contradicting both the code and the Phase 1 decision that chose 0.2. `CHROMA_DIR` and
+  `UPLOAD_DIR` were removed outright — their defaults are absolute, and a relative value in `.env`
+  resolves against the process working directory, which is the exact class of silent config bug
+  this project has already paid for twice.
+- **`npm ci`, not `npm install`,** in the frontend image and in CI, so the lockfile is what ships.
+
+**Frontend tests** — Vitest + Testing Library, 30 tests, chosen for what breaks *silently*:
+
+- **The 401 interceptor**, including its carve-out: a 401 from `/auth/login` is a wrong password,
+  not a dead session, and getting that backwards logs you out of a session you never had.
+- **`ProtectedRoute`'s third state.** The obvious case — an anonymous visitor is redirected — fails
+  loudly the first time anyone tries it. The refresh bounce does not: a stored token mid-exchange
+  reads as unauthenticated for one render and throws the user to /login and back on every reload.
+- **`AuthContext`**, at the seam between the token in storage and the user in memory.
+- **`Reports`**, through all four states, because "empty is not the same as failed" is a rule that
+  erodes silently — a refactor that folds the error branch into the empty branch breaks nothing
+  visible in development, where the API is always up.
+- **Vitest config lives in `vite.config.js`**, not a second file: two configs are two chances for
+  the test build and the real build to resolve `@/` differently.
+
+**CI** — three jobs, from a clean checkout with none of this machine's state.
+
+- **Postgres as a service container with a healthcheck.** Without one the runner starts the job
+  immediately and the first test connects before Postgres is listening.
+- **`ENVIRONMENT: ci`**, which is not `local`, so `config.py` demands a real signing key — the
+  environment guard is itself exercised on every run.
+- **Migrations run as their own step**, so a broken migration fails where it happened rather than
+  as a confusing test error.
+- **`ruff check` only; `ruff format` is not enforced.** The formatter would rewrap every docstring
+  and comment in this codebase, and the comments carry most of the reasoning — a reformat that
+  turns a paragraph explaining a bug into differently-wrapped lines is a large diff that hides real
+  ones. `B008` is not switched off either: `extend-immutable-calls` names FastAPI's `Depends`,
+  `Query` and friends, so the check keeps working on a real `def f(x=[])`.
+- **The backend image is not built in CI, and that is stated rather than skipped.** It installs
+  torch and bakes in the model — around 3.3 GB — which exceeds what a standard runner holds
+  alongside its toolchain. The same `requirements.txt` is installed from scratch in the backend job,
+  so what is left unproven is the Dockerfile alone.
+
+**Cleanup:** `ruff --fix` across the tree; `langchain-core` dropped (nothing imports it, and all
+three providers pin it themselves); `lru_cache` removed from `services/llm`;
+`@radix-ui/react-avatar` and `@radix-ui/react-scroll-area` removed (`Avatar` is hand-written and
+nothing scrolls through Radix). `npm run lint` is clean with no warnings: the twelve
+`react-refresh/only-export-components` warnings are switched off **for the design system and the
+auth provider only**, where they fire on Radix re-exports, a `cva` object and two hooks that must
+live beside their provider. The rule stays on for pages and feature components, where a stray
+non-component export really does cost state on every save.
 
 **Update this section at the end of every phase.**

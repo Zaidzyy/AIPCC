@@ -16,4 +16,14 @@ export default defineConfig({
     // Required so the dev server is reachable from outside the container.
     host: true,
   },
+  test: {
+    // In this config rather than a separate vitest.config.js so the tests
+    // resolve `@/` through the same alias the app does. Two configs would be
+    // two chances for the test build and the real build to disagree.
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.js'],
+    css: false,
+    include: ['src/**/*.{test,spec}.{js,jsx}'],
+  },
 })

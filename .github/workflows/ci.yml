@@ -1,0 +1,142 @@
+name: CI
+
+# Everything here runs from a clean checkout on a runner that has none of this
+# project's state: no Postgres data, no .venv, no node_modules, no .env, no
+# embedding model on disk. That is the point — it is the only check that the
+# repository is genuinely self-contained.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  # A second push to the same branch cancels the first. Nothing here needs to
+  # finish for a commit that has already been superseded.
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend — lint and tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aipcc
+          POSTGRES_PASSWORD: aipcc
+          POSTGRES_DB: aipcc
+        ports:
+          - 5432:5432
+        # The runner starts the container and the job immediately; without a
+        # healthcheck the first test connects before Postgres is listening.
+        options: >-
+          --health-cmd "pg_isready -U aipcc -d aipcc"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgresql+psycopg://aipcc:aipcc@localhost:5432/aipcc
+      ENVIRONMENT: ci
+      # `ci` is not `local`, so config.py demands a real signing key. This one
+      # exists only for the length check — it signs nothing that leaves the job.
+      JWT_SECRET: ci-only-signing-key-long-enough-for-hs256-rfc7518
+      CHROMA_DIR: ${{ github.workspace }}/backend/chroma_langchain_db
+      UPLOAD_DIR: ${{ github.workspace }}/backend/uploads
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        # The CPU torch wheel, for the same reason the Dockerfile pins it: the
+        # default Linux wheel bundles a CUDA runtime this workload never uses
+        # and would push the runner over its disk budget.
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r requirements.txt
+
+      - name: Lint
+        # `ruff check` only. `ruff format` is deliberately not enforced — see
+        # the note at the top of backend/ruff.toml.
+        run: ruff check app tests
+
+      - name: Cache the embedding model
+        # One test performs a real upload and ingest, which loads MiniLM. Left
+        # uncached it is a ~90 MB Hugging Face download on every run, and a
+        # rate limit there would fail a job that has nothing to do with it.
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: hf-minilm-v1
+
+      - name: Apply migrations
+        # Schema comes from Alembic, never from application code — so if the
+        # migrations are wrong, CI fails here rather than in a confusing test.
+        run: alembic upgrade head
+
+      - name: Tests
+        run: pytest -q
+
+  frontend:
+    name: Frontend — lint, tests and build
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        # `npm ci`, so the lockfile is what is tested — the same reason the
+        # frontend Dockerfile uses it.
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+  compose:
+    name: Docker images build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Validate the compose file
+        run: docker compose config --quiet
+
+      - name: Build the frontend image
+        # The backend image is deliberately not built here. It installs torch
+        # and bakes in the embedding model — around 3.3 GB — which exceeds what
+        # a standard runner can hold alongside its preinstalled toolchain. The
+        # backend's dependencies are already proven by the job above, which
+        # installs the same requirements.txt from scratch; what is left
+        # unproven is the Dockerfile itself, and that is stated rather than
+        # quietly skipped.
+        run: docker compose build frontend

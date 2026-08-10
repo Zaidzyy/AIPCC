@@ -19,12 +19,12 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import authorize_owner, get_current_user, require_human
+from app.api.deps import authorize_owner, require_human
 from app.api.responses import as_download
 from app.db import models
 from app.db.session import get_db
 from app.schemas.report import ThreatIntelItem
-from app.schemas.share import ShareCreate, ShareCreated, ShareLink, SharedReport
+from app.schemas.share import ShareCreate, ShareCreated, SharedReport, ShareLink
 from app.services import export, share
 from app.services.report_storage import load_report_sections
 

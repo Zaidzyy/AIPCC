@@ -39,15 +39,17 @@ from app.db.session import SessionLocal
 # domains and `EmailStr` rejects them, so a seeded admin using one could not be
 # serialized by the API that is supposed to return it.
 ADMIN_EMAIL = "admin@aipcc.io"
-ADMIN_PASSWORD = "admin"  # noqa: S105 — local demo credential, documented in README
+ADMIN_PASSWORD = "admin"
 # `--demo` also creates an analyst, so a reviewer can log in as a non-admin and
 # watch the ownership scoping do its job: the same dashboard, smaller numbers.
 ANALYST_EMAIL = "analyst@aipcc.io"
-ANALYST_PASSWORD = "analyst"  # noqa: S105 — local demo credential
+ANALYST_PASSWORD = "analyst"
 # The account the n8n workflows authenticate as. It has no usable password —
 # see `seed_service_account` — because it is not meant to be logged into.
 SERVICE_EMAIL = "n8n@aipcc.io"
-SAMPLE_CSV = Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic_pegasus_dataset.csv"
+SAMPLE_CSV = (
+    Path(__file__).resolve().parents[2] / "tests" / "fixtures" / "synthetic_pegasus_dataset.csv"
+)
 
 SEEDED_EMAILS = (ADMIN_EMAIL, ANALYST_EMAIL, SERVICE_EMAIL)
 

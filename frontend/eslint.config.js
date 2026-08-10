@@ -40,4 +40,38 @@ export default [
       "no-unused-vars": ["error", { varsIgnorePattern: "^[A-Z_]" }],
     },
   },
+  {
+    /**
+     * `react-refresh/only-export-components` off for the design system and the
+     * auth provider, and nowhere else.
+     *
+     * The rule protects component state across a hot reload, and it fires here
+     * on three things that cannot lose any:
+     *   - `export const Dialog = DialogPrimitive.Root` — a re-export of a
+     *     third-party component the plugin cannot statically recognise as one;
+     *   - `buttonVariants`, a `cva` object;
+     *   - `useToast` / `useAuth`, hooks that must live beside the provider
+     *     that owns their context.
+     *
+     * Splitting each context into a third module to satisfy the plugin would
+     * add a file per primitive to make a false positive go quiet. It stays on
+     * for pages and feature components, where a stray non-component export
+     * really does cost state on every save.
+     */
+    files: [
+      "src/components/ui/**/*.jsx",
+      "src/context/AuthContext.jsx",
+    ],
+    rules: {
+      "react-refresh/only-export-components": "off",
+    },
+  },
+  {
+    // Tests import Vitest's API explicitly, but jsdom globals and the Node
+    // globals the setup file touches are not in `globals.browser`.
+    files: ["src/**/*.{test,spec}.{js,jsx}", "src/test/**/*.{js,jsx}"],
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node },
+    },
+  },
 ];

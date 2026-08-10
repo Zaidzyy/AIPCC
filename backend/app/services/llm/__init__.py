@@ -8,7 +8,7 @@ provider entirely.
 
 from __future__ import annotations
 
-from functools import lru_cache
+from functools import cache
 
 from app.core.config import settings
 from app.services.llm.base import LLMError, LLMProvider, extract_text
@@ -17,7 +17,7 @@ from app.services.llm.providers import PROVIDERS
 __all__ = ["LLMError", "LLMProvider", "extract_text", "get_llm_provider"]
 
 
-@lru_cache(maxsize=None)
+@cache
 def get_llm_provider(name: str | None = None) -> LLMProvider:
     """Return the configured provider, constructing it once per name."""
     selected = (name or settings.llm_provider).lower()

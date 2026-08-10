@@ -8,9 +8,11 @@ uvicorn[standard]>=0.32,<1.0
 python-multipart>=0.0.20,<1.0
 
 # --- LLM providers ---
-# langchain-core is required; the three provider packages are each only needed
-# for the backend you actually select with LLM_PROVIDER (imports are deferred).
-langchain-core>=0.3,<1.0
+# The three provider packages are each only needed for the backend you actually
+# select with LLM_PROVIDER, and their imports are deferred to the point of use
+# — so an unset GROQ_API_KEY is a config error, not an ImportError at boot.
+# langchain-core is not listed: nothing here imports it, and all three
+# providers pin a compatible version themselves.
 langchain-google-genai>=2.0,<3.0
 langchain-groq>=0.2,<1.0
 langchain-ollama>=0.2,<1.0
@@ -47,5 +49,11 @@ python-docx>=1.1,<2.0
 reportlab>=4.2,<5.0
 
 # --- Tests ---
+# Kept in the main file rather than split into requirements-dev.txt: the
+# backend image deliberately keeps tests/ (seed.py reads its sample dataset
+# from tests/fixtures/), and `docker compose exec backend pytest` is the
+# documented way to run the suite without a local Python at all.
 pytest>=8.3,<9.0
 httpx>=0.28,<1.0
+# Lint. Configured in ruff.toml; CI runs `ruff check app tests`.
+ruff>=0.8,<1.0

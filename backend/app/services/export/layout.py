@@ -199,12 +199,12 @@ def _integrity_label(source: ExportSource) -> str:
     UNKNOWN is spelled out as the absence of a check rather than shortened to
     "Unverified", because on paper there is no grey badge to carry the meaning.
     """
-    checked = source.integrity_checked_at
     state = str(source.integrity_state or "UNKNOWN").upper()
+    checked = f"(checked {_timestamp(source.integrity_checked_at)})"
     if state == "SEALED":
-        return f"Sealed — the source log still matches its recorded hash (checked {_timestamp(checked)})"
+        return f"Sealed — the source log still matches its recorded hash {checked}"
     if state == "TAMPERED":
-        return f"TAMPERED — the source log no longer matches its recorded hash (checked {_timestamp(checked)})"
+        return f"TAMPERED — the source log no longer matches its recorded hash {checked}"
     return "Not verified — the source log has not been checked since this report was generated"
 
 
