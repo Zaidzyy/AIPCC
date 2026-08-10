@@ -25,6 +25,7 @@ export const keys = {
   document: (id) => ["documents", id],
   reports: ["reports"],
   report: (id) => ["reports", id],
+  reportGraph: (id) => ["reports", id, "graph"],
   users: ["users"],
   chats: ["chats"],
   chat: (id) => ["chats", id],
@@ -256,6 +257,16 @@ export function useInvalidateAfterGeneration() {
     queryClient.invalidateQueries({ queryKey: keys.dashboard });
     queryClient.invalidateQueries({ queryKey: ["attack", "detections"] });
   }, [queryClient]);
+}
+
+export function useReportGraph(reportId) {
+  return useQuery({
+    queryKey: keys.reportGraph(reportId),
+    queryFn: () => reportsApi.graph(reportId),
+    enabled: Boolean(reportId),
+    // A stored report's entities cannot change without the report changing.
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 export function useDeleteReport() {

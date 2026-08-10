@@ -18,6 +18,7 @@ from app.api.deps import authorize_owner, get_current_user, is_admin
 from app.api.responses import as_download
 from app.db import models
 from app.db.session import get_db
+from app.schemas.graph import AttackGraph
 from app.schemas.report import (
     ClassificationUpdate,
     GenerateReportRequest,
@@ -27,7 +28,7 @@ from app.schemas.report import (
     ReportSummary,
     StoreGeneratedReportRequest,
 )
-from app.services import audit, export, report_stream
+from app.services import attack_graph, audit, export, report_stream
 from app.services.report import generate_report
 from app.services.report_storage import load_report_detail, reserve_report, store_report
 
@@ -285,6 +286,23 @@ def get_report_status(
 ) -> ReportStatusResponse:
     report = _get_authorized_report(db, user, report_id)
     return ReportStatusResponse.model_validate(report)
+
+
+@router.get("/reports/{report_id}/graph", response_model=AttackGraph)
+def report_graph(
+    report_id: uuid.UUID,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> AttackGraph:
+    """The entities this report names, and how its own rows relate them.
+
+    Scoped like every other report route, and deliberately per-report rather
+    than across a whole account: a graph built from every report a user owns
+    would join entities that were never observed together, which is the one
+    thing a graph must not do.
+    """
+    report = _get_authorized_report(db, user, report_id)
+    return attack_graph.build_graph(db, report)
 
 
 @router.get(

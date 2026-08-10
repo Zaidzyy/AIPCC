@@ -77,9 +77,9 @@ ATTACKS = [
         "attack_mitre_technique_id": "T1110",
         "attack_mitre_technique_name": "Brute Force",
         "attack_description": (
-            "Sustained authentication attempts against the VPN concentrator from a "
-            "single autonomous system, cycling a short password list across many "
-            "valid usernames."
+            "Sustained authentication attempts against the VPN concentrator "
+            "vpn-gw-01 from 203.0.113.44, cycling a short password list across many "
+            "valid usernames including svc_backup."
         ),
         "risk_name": "Credential compromise via password spraying",
         "risk_description": (
@@ -212,9 +212,9 @@ ATTACKS = [
         "attack_name": "Remote Services",
         "attack_mitre_technique_id": "T1021",
         "attack_mitre_technique_name": "Remote Services",
-        "attack_description": "SMB sessions from one workstation to nineteen hosts inside four minutes.",
+        "attack_description": "SMB sessions from 10.14.5.72 to nineteen hosts inside four minutes, all initiated by a.silva.",
         "risk_name": "Lateral movement across the workstation estate",
-        "risk_description": "Local administrator passwords are shared across the build, so one hash opens all of them.",
+        "risk_description": "Local administrator passwords are shared across the build, so one hash taken from 10.14.5.72 opens all of them.",
         "risk_level": "High",
         "impact": "Fleet-wide access from a single compromised endpoint.",
         "likelihood": "High",
@@ -224,7 +224,7 @@ ATTACKS = [
         "attack_name": "Ingress Tool Transfer",
         "attack_mitre_technique_id": "T1105",
         "attack_mitre_technique_name": "Ingress Tool Transfer",
-        "attack_description": "A signed system binary retrieved an archive from a paste service and wrote it to a temp path.",
+        "attack_description": "A signed system binary on wks-4471 retrieved an archive from a paste service and wrote it to a temp path.",
         "risk_name": "Tooling staged on a compromised host",
         "risk_description": "The download used a living-off-the-land binary, so application allow-listing did not fire.",
         "risk_level": "Medium",
@@ -251,7 +251,7 @@ ATTACKS = [
         "attack_name": "Web Service",
         "attack_mitre_technique_id": "T1102",
         "attack_mitre_technique_name": "Web Service",
-        "attack_description": "Outbound traffic to a legitimate collaboration API at a cadence unusual for the host's role.",
+        "attack_description": "Outbound traffic from 10.14.3.18 to a legitimate collaboration API at a cadence unusual for the host's role.",
         "risk_name": "Low-volume traffic to a permitted third party",
         "risk_description": "The destination is on the corporate allow list, so the traffic is indistinguishable from sanctioned use.",
         "risk_level": "Low",
@@ -263,7 +263,7 @@ ATTACKS = [
         "attack_name": "Application Layer Protocol",
         "attack_mitre_technique_id": "T1071",
         "attack_mitre_technique_name": "Application Layer Protocol",
-        "attack_description": "DNS TXT queries averaging 180 bytes of base32 payload to a single delegated zone.",
+        "attack_description": "DNS TXT queries from 10.14.9.11 averaging 180 bytes of base32 payload to a single delegated zone at 192.0.2.53.",
         "risk_name": "Covert channel over DNS",
         "risk_description": "Resolver logs are retained for 24 hours, which is shorter than the observed campaign.",
         "risk_level": "High",
