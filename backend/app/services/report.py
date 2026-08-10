@@ -26,7 +26,7 @@ import json
 import logging
 import re
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ValidationError
@@ -287,6 +287,38 @@ def retrieve_context(spec: SectionSpec, document_id: str) -> list[SourceChunk]:
 # --- Section generation ---------------------------------------------------
 
 
+@dataclass(frozen=True)
+class SectionEvent:
+    """One thing that happened to one section, while it was happening.
+
+    The point of surfacing these is `retrying`. A section that fails validation
+    and recovers on the repair prompt is this system demonstrating the
+    robustness it claims — invisible in a two-minute spinner, and the single
+    most interesting thing a reviewer can watch. Emitting it is the feature,
+    not an implementation detail leaking out.
+
+    `elapsed_ms` is measured per section from the moment that section started,
+    not from the start of the report: the five run concurrently, so a clock
+    shared between them would say nothing about any of them.
+    """
+
+    section: str
+    # started | retrying | completed | failed
+    state: str
+    attempt: int = 1
+    items: int | None = None
+    ungrounded: int | None = None
+    reason: str | None = None
+    error: SectionError | None = None
+    elapsed_ms: float | None = None
+
+
+# Async because the only consumer pushes onto an `asyncio.Queue`. A sync
+# callback would work today and would silently block all five sections the
+# first time somebody put a database write behind it.
+ProgressHook = Callable[[SectionEvent], Awaitable[None]]
+
+
 @dataclass
 class SectionOutcome:
     name: str
@@ -312,42 +344,62 @@ async def generate_section(
     document_id: str,
     provider: LLMProvider,
     retriever: Retriever | None = None,
+    on_event: ProgressHook | None = None,
 ) -> SectionOutcome:
     """Generate one section: retrieve, prompt, parse, validate, retry once."""
     usage: list[LlmCallRecord] = []
     retriever = retriever or retrieve_context
+    started = time.perf_counter()
+
+    async def emit(state: str, **fields) -> None:
+        """Progress reporting must never be able to fail a section.
+
+        A stream nobody is reading — a client that hung up, a queue that is
+        full — is not a reason to lose a report that generated correctly.
+        """
+        if on_event is None:
+            return
+        try:
+            await on_event(
+                SectionEvent(
+                    section=spec.name,
+                    state=state,
+                    elapsed_ms=round((time.perf_counter() - started) * 1000, 2),
+                    **fields,
+                )
+            )
+        except Exception:  # pragma: no cover - defensive
+            logger.warning("progress hook failed", extra={"section": spec.name})
 
     with tracer.start_as_current_span("report.section") as span:
         span.set_attribute("section.name", spec.name)
+        await emit("started")
 
         try:
             chunks = await asyncio.to_thread(retriever, spec, document_id)
         except Exception as exc:
             logger.exception("retrieval failed for section %s", spec.name)
-            return SectionOutcome(
-                spec.name,
-                error=SectionError(
-                    section=spec.name, stage="llm", detail=f"retrieval failed: {exc}"
-                ),
+            error = SectionError(
+                section=spec.name, stage="llm", detail=f"retrieval failed: {exc}"
             )
+            await emit("failed", error=error)
+            return SectionOutcome(spec.name, error=error)
 
         if not chunks:
-            return SectionOutcome(
-                spec.name,
-                error=SectionError(
-                    section=spec.name,
-                    stage="llm",
-                    detail=(
-                        f"no indexed content for document {document_id}. "
-                        "Has it been ingested?"
-                    ),
+            error = SectionError(
+                section=spec.name,
+                stage="llm",
+                detail=(
+                    f"no indexed content for document {document_id}. "
+                    "Has it been ingested?"
                 ),
             )
+            await emit("failed", error=error)
+            return SectionOutcome(spec.name, error=error)
 
         outcome = await _attempt_section(
-            spec, provider, render_context(chunks), usage, span
+            spec, provider, render_context(chunks), usage, span, emit
         )
-
         # Citations are resolved after the section validates, against the
         # chunks this section was actually shown. A finding that cites nothing
         # valid stays in the report and is simply absent from the evidence
@@ -357,6 +409,19 @@ async def generate_section(
             span.set_attribute("section.ungrounded", outcome.grounding.ungrounded_items)
             span.set_attribute(
                 "section.invalid_citations", outcome.grounding.invalid_citations
+            )
+
+        # Emitted after grounding, so `completed` means what the UI will show —
+        # including how many of this section's findings are ungrounded. A
+        # terminal event that arrives before the work behind it is finished is
+        # the standard way a progress stream ends up lying.
+        if outcome.error is not None:
+            await emit("failed", error=outcome.error)
+        else:
+            await emit(
+                "completed",
+                items=len(outcome.items),
+                ungrounded=outcome.grounding.ungrounded_items,
             )
         return outcome
 
@@ -387,6 +452,7 @@ async def _attempt_section(
     context: str,
     usage: list[LlmCallRecord],
     span,
+    emit: Callable[..., Awaitable[None]] | None = None,
 ) -> SectionOutcome:
     prompt = build_prompt(spec, context)
     raw = ""
@@ -447,6 +513,12 @@ async def _attempt_section(
                 extra={"section": spec.name, "stage": last_stage, "reason": last_error},
             )
             span.set_attribute("section.retried", True)
+            if emit is not None:
+                # The event this whole feature exists for. A reviewer watching
+                # a section fail validation and come back on the repair prompt
+                # is watching the robustness this project claims, which a
+                # spinner hides completely.
+                await emit("retrying", attempt=2, reason=f"{last_stage}: {last_error}")
             prompt = build_repair_prompt(spec, raw, last_error)
 
     span.set_attribute("section.failed", True)
@@ -480,6 +552,7 @@ async def generate_report(
     document_id: str,
     provider: LLMProvider | None = None,
     retriever: Retriever | None = None,
+    on_event: ProgressHook | None = None,
 ) -> ReportGenerationResult:
     """Generate every section concurrently.
 
@@ -499,7 +572,7 @@ async def generate_report(
 
         outcomes = await asyncio.gather(
             *(
-                generate_section(spec, document_id, provider, retriever)
+                generate_section(spec, document_id, provider, retriever, on_event)
                 for spec in SECTION_SPECS
             ),
             return_exceptions=True,

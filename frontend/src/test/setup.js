@@ -30,6 +30,28 @@ globalThis.ResizeObserver ??= class {
   disconnect() {}
 };
 
+// `AmbientVideo` pauses itself off-screen, which jsdom cannot observe. Without
+// this any test rendering a page that carries the ambient clip throws in an
+// effect rather than failing an assertion — an error that reads as a broken
+// test rather than a missing browser API.
+globalThis.IntersectionObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+  takeRecords() {
+    return [];
+  }
+};
+
+// jsdom's HTMLMediaElement has no playback implementation and `play()` is not
+// merely a no-op — it throws "Not implemented".
+if (!globalThis.HTMLMediaElement.prototype.play.__stubbed) {
+  const stub = () => Promise.resolve();
+  stub.__stubbed = true;
+  globalThis.HTMLMediaElement.prototype.play = stub;
+  globalThis.HTMLMediaElement.prototype.pause = () => {};
+}
+
 if (!Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }

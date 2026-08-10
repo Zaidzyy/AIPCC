@@ -1,9 +1,10 @@
 import { AlertTriangle, ArrowRight, FileUp, Upload } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 
 import { AmbientVideo } from "@/components/common/AmbientVideo";
 import { PageHeader } from "@/components/common/PageHeader";
+import { GenerationProgress } from "@/components/report/GenerationProgress";
 import {
   Button,
   Card,
@@ -20,8 +21,13 @@ import {
   Skeleton,
   useToast,
 } from "@/components/ui";
-import { useDocuments, useGenerateReport, useUploadDocument } from "@/hooks/queries";
-import { errorDetail, errorMessage } from "@/lib/apiClient";
+import {
+  useDocuments,
+  useInvalidateAfterGeneration,
+  useUploadDocument,
+} from "@/hooks/queries";
+import { useGenerationStream } from "@/hooks/useGenerationStream";
+import { errorMessage } from "@/lib/apiClient";
 import { CLASSIFICATIONS, formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
@@ -34,7 +40,8 @@ export function Generate() {
   const documents = useDocuments();
   const [progress, setProgress] = useState(null);
   const upload = useUploadDocument({ onProgress: setProgress });
-  const generate = useGenerateReport();
+  const generation = useGenerationStream();
+  const invalidate = useInvalidateAfterGeneration();
 
   const [documentId, setDocumentId] = useState("");
   const [reportName, setReportName] = useState("");
@@ -65,23 +72,37 @@ export function Generate() {
     }
   }
 
-  async function handleGenerate(event) {
+  function handleGenerate(event) {
     event.preventDefault();
-    try {
-      const report = await generate.mutateAsync({
-        documentId,
-        reportName: reportName.trim(),
-        classification,
-      });
-      navigate(`/reports/${report.report_id}`);
-    } catch {
-      /* Rendered inline below — the failure detail is worth more than a toast. */
-    }
+    // Deliberately not awaited: the stream resolves only when generation ends,
+    // and the UI has to render its first frame long before that.
+    generation.start({ documentId, reportName: reportName.trim(), classification });
   }
+
+  // Navigation happens on the terminal event rather than inside the handler,
+  // so a run that was resumed after a remount lands in the same place as one
+  // watched from the start.
+  useEffect(() => {
+    const result = generation.result;
+    if (generation.phase !== "done" || !result) return;
+    // A failed report is still a stored row, so the list and the aggregates
+    // have changed either way.
+    invalidate();
+    if (result.status === "failed") return; // shown below, with its errors
+    navigate(`/reports/${result.report_id}`);
+  }, [generation.phase, generation.result, invalidate, navigate]);
 
   // Generation replaces the form entirely, so the loading clip is never on
   // screen at the same time as the object-core loop — manifest rule 1.
-  if (generate.isPending) return <GeneratingState name={reportName} />;
+  if (generation.phase === "streaming" || generation.phase === "reconnecting") {
+    return (
+      <GenerationProgress
+        name={generation.reportName}
+        sections={generation.sections}
+        reconnecting={generation.phase === "reconnecting"}
+      />
+    );
+  }
 
   return (
     <>
@@ -180,7 +201,16 @@ export function Generate() {
                 <ArrowRight />
               </Button>
 
-              {generate.isError && <GenerationFailure error={generate.error} />}
+              {generation.phase === "error" && (
+                <GenerationFailure message={errorMessage(generation.error)} />
+              )}
+              {generation.phase === "done" && generation.result?.status === "failed" && (
+                <GenerationFailure
+                  message="Report generation produced no usable sections."
+                  sections={generation.result.errors}
+                  reportId={generation.result.report_id}
+                />
+              )}
             </form>
           </CardBody>
         </Card>
@@ -261,22 +291,19 @@ function Dropzone({ onFile, uploading, progress }) {
 }
 
 /**
- * `/generate_report` answers 502 with a structured body listing which sections
- * failed and why. Flattening that into "Something went wrong" would throw away
- * the only thing that makes the failure actionable.
+ * A generation that produced nothing usable.
+ *
+ * The stream's terminal frame carries the same typed `SectionError` list the
+ * non-streaming 502 does, and flattening it into "Something went wrong" would
+ * throw away the only thing that makes the failure actionable.
  */
-function GenerationFailure({ error }) {
-  const detail = errorDetail(error);
-  const sections = detail?.errors ?? [];
-
+function GenerationFailure({ message, sections = [], reportId = null }) {
   return (
     <div className="rounded-md border border-critical/30 bg-critical/8 p-4">
       <div className="flex items-start gap-2.5">
         <AlertTriangle className="mt-0.5 size-4 shrink-0 text-critical" aria-hidden="true" />
         <div className="min-w-0 flex-1">
-          <p className="font-mono text-[0.8125rem] font-medium text-critical">
-            {detail?.message ?? errorMessage(error, "Generation failed.")}
-          </p>
+          <p className="font-mono text-[0.8125rem] font-medium text-critical">{message}</p>
 
           {sections.length > 0 && (
             <ul className="mt-2.5 space-y-1.5">
@@ -295,9 +322,9 @@ function GenerationFailure({ error }) {
             and its API key in the backend environment.
           </p>
 
-          {detail?.report_id && (
+          {reportId && (
             <Button variant="ghost" size="sm" className="mt-2 -ml-3" asChild>
-              <Link to={`/reports/${detail.report_id}`}>
+              <Link to={`/reports/${reportId}`}>
                 View the stored attempt
                 <ArrowRight />
               </Link>
@@ -305,21 +332,6 @@ function GenerationFailure({ error }) {
           )}
         </div>
       </div>
-    </div>
-  );
-}
-
-function GeneratingState({ name }) {
-  return (
-    <div className="flex min-h-[60vh] flex-col items-center justify-center text-center">
-      <div className="relative mb-6 size-28 overflow-hidden rounded-full">
-        <AmbientVideo clip="loading-ring" opacity="opacity-90" scrim="bg-transparent" />
-      </div>
-      <p className="font-mono text-base font-medium text-ink">Generating {name || "report"}</p>
-      <p className="mt-2 max-w-sm text-sm text-ink-dim">
-        Five sections are being written concurrently and validated against the report schema.
-        This usually takes under a minute.
-      </p>
     </div>
   );
 }

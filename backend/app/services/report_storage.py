@@ -61,6 +61,58 @@ def resolve_status(sections: ReportSections, errors: list[SectionError]) -> str:
     return "complete"
 
 
+def reserve_report(
+    db: Session,
+    *,
+    document_id: uuid.UUID,
+    user_id: uuid.UUID,
+    report_name: str,
+    classification: str,
+) -> models.Report:
+    """Insert an empty report in `generating` state and commit it.
+
+    Only the streaming path uses this, and only because a client that loses the
+    connection has to be able to find its way back. `GET /reports/{id}/status`
+    already answers "how did this go" — but it needs an id, and an id that only
+    exists once generation *finishes* is no use to somebody whose laptop slept
+    halfway through. So the row is created first and its id goes out in the
+    stream's opening event.
+
+    `generating` is not a new state: the status column has documented
+    `pending | generating | complete | partial | failed` since Phase 0 and this
+    is the first writer of the third one.
+
+    The document is sealed here rather than at the end, which is the correct
+    moment anyway — the hash should describe the file the analysis actually
+    read, not whatever it happens to be several minutes later.
+    """
+    document = db.get(models.Document, document_id)
+    report = models.Report(
+        report_name=report_name,
+        document_id=document_id,
+        user_id=document.user_id if document else user_id,
+        classification=classification,
+        status="generating",
+        file_hash=hash_document(document.document_path) if document else None,
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    return report
+
+
+def fail_report(db: Session, report: models.Report, detail: str) -> None:
+    """Close out a reserved report that never produced anything.
+
+    Exists so a crash cannot leave a row stuck in `generating` forever, which
+    would be a report that is neither running nor finished — the one state a
+    status endpoint cannot describe honestly.
+    """
+    report.status = "failed"
+    report.error_detail = detail[:2000]
+    db.commit()
+
+
 def store_report(
     db: Session,
     *,
@@ -68,6 +120,7 @@ def store_report(
     user_id: uuid.UUID,
     report_name: str,
     classification: str,
+    report: models.Report | None = None,
     sections: ReportSections,
     errors: list[SectionError] | None = None,
     threat_intel: list[ThreatIntelCreate] | None = None,
@@ -90,6 +143,12 @@ def store_report(
     This is not a hardcoded user (hard rule #2). The caller is still resolved
     from their token and still authorized against the document before reaching
     here; ownership of the *output* simply follows ownership of the *input*.
+
+    `report` fills in a row already reserved by `reserve_report` instead of
+    inserting a new one. One function rather than two, deliberately: the
+    section, evidence and usage writes below are the part that must never
+    differ between the app path, the n8n path and the streaming path, and a
+    second copy of them is exactly how the prototype's field names drifted.
     """
     errors = errors or []
     usage = usage or []
@@ -105,23 +164,35 @@ def store_report(
     token_values = [r.total_tokens for r in usage if r.total_tokens is not None]
     cost_values = [r.cost_usd for r in usage if r.cost_usd is not None]
 
-    report = models.Report(
-        report_name=report_name,
-        document_id=document_id,
-        user_id=owner_id,
-        classification=classification,
-        status=resolve_status(sections, errors),
-        error_detail=_format_errors(errors),
-        total_tokens=sum(token_values) if token_values else None,
-        total_cost_usd=sum(cost_values) if cost_values else None,
-        generation_ms=generation_ms,
-        ungrounded_findings=ungrounded_findings,
-        invalid_citations=invalid_citations,
+    fields = {
+        "report_name": report_name,
+        "document_id": document_id,
+        "user_id": owner_id,
+        "classification": classification,
+        "status": resolve_status(sections, errors),
+        "error_detail": _format_errors(errors),
+        "total_tokens": sum(token_values) if token_values else None,
+        "total_cost_usd": sum(cost_values) if cost_values else None,
+        "generation_ms": generation_ms,
+        "ungrounded_findings": ungrounded_findings,
+        "invalid_citations": invalid_citations,
+    }
+
+    if report is None:
         # Seal the source document as it is right now. A missing or unreadable
         # file leaves this null and the report UNKNOWN rather than failing the
         # write — an unsealable report is still a report.
-        file_hash=hash_document(document.document_path) if document else None,
-    )
+        report = models.Report(
+            **fields,
+            file_hash=hash_document(document.document_path) if document else None,
+        )
+    else:
+        # A reserved row keeps the hash taken when generation started, which is
+        # the file the analysis actually read. Re-hashing here would describe
+        # whatever the file is now — the question a report exists to *not*
+        # answer (Phase 5).
+        for key, value in fields.items():
+            setattr(report, key, value)
     db.add(report)
     # Flush so the primary key exists before children reference it. This is the
     # step the prototype was missing.
