@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { IntroSequence } from "@/components/common/IntroSequence";
 import { AppShell } from "@/components/layout/AppShell";
 import { Alerts } from "@/pages/Alerts";
+import { Audit } from "@/pages/Audit";
 import { Chat } from "@/pages/Chat";
 import { Dashboard } from "@/pages/Dashboard";
 import { Generate } from "@/pages/Generate";
@@ -49,6 +50,7 @@ export default function App() {
 
             <Route element={<AdminRoute />}>
               <Route path="/users" element={<Users />} />
+              <Route path="/audit" element={<Audit />} />
             </Route>
 
             <Route path="*" element={<NotFound />} />

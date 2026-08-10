@@ -48,14 +48,16 @@ backend/
       security.py           # bcrypt hashing, JWT create/verify, auth dependencies
       api_key.py            # long-lived machine credentials (SHA-256, not bcrypt)
       share_token.py        # read-one-report capability tokens (neither JWT nor API key)
+      middleware.py         # security response headers — two CSPs: API vs /docs
     db/
       session.py            # engine + session factory (NEVER drop/create on import)
       models.py             # SQLAlchemy models
       seed.py               # explicit seed script, run manually
       demo_data.py          # deterministic --demo fixtures (fixed seed, no LLM)
+      prune.py              # drops aged auth_attempts — never touches audit_log
     schemas/                # Pydantic: API request/response + LLM output schemas
     api/routers/            # auth, users, documents, reports, shares, chat,
-                            #   dashboard, alerts, api_keys
+                            #   dashboard, alerts, api_keys, audit
     services/
       rag/                  # ingest, chunk, embed  (ported from prototype)
       llm/                  # LLMProvider abstraction + implementations
@@ -66,6 +68,8 @@ backend/
       chatbot.py            # chat over ingested docs
       integrity.py          # SHA-256 sealing + safe upload-path resolution
       share.py              # share-link rules: creation, expiry, revocation, classification
+      ratelimit.py          # IP lockout + per-account progressive delay, state in Postgres
+      audit.py              # the append-only trail: action vocabulary, redaction, record()
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -120,6 +124,8 @@ python -m app.db.seed --demo       # + six weeks of deterministic demo reports
 python -m app.db.seed --ingest     # + embed the sample CSV (needed to generate)
 python -m app.db.seed --service-token  # + an API key for the n8n workflows (shown once)
 python -m app.db.seed --reset --demo   # wipe seeded users first, then re-seed
+python -m app.db.prune                 # drop aged rate-limit rows (never the audit log)
+python -m app.db.prune --days 0        # ...or all of them
 pytest
 ruff check app tests               # lint; config in backend/ruff.toml
 
@@ -191,9 +197,9 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–6 complete; Phase 7 part 1 (reproducibility, tests, CI, cleanup) complete — README and
-screenshots deliberately not written yet.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase
-sequence and
+**Phases 0–7 complete and merged. Phase 8 (security hardening + audit trail) complete on
+`phase-8-hardening`, not yet merged — README and screenshots deliberately still not written.**
+See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
@@ -212,10 +218,14 @@ the real endpoints with auth attached,
 **and report export to PDF and DOCX from one format-independent layout, a closed
 `Public | Internal | Confidential` classification enforced at the API, and revocable, expiring,
 read-only share links with a public route outside the authenticated shell,
-**and a one-command `docker compose up` verified from empty volumes, 30 Vitest/Testing-Library
+**and a one-command `docker compose up` verified from empty volumes, Vitest/Testing-Library
 frontend tests, and a GitHub Actions pipeline running backend lint + migrations + pytest against a
-Postgres service container alongside frontend lint + tests + build.** 318 backend tests and 30
-frontend tests pass; `ruff check` and `npm run lint` are both clean with no warnings.
+Postgres service container alongside frontend lint + tests + build,
+**and login brute-force protection — a hard per-IP lockout plus a per-account progressive delay
+that is never a lock — security response headers on every response with separate policies for the
+API and its docs, and an append-only audit log enforced by a Postgres trigger, with an admin-only
+filterable view.** 377 backend tests and 32 frontend tests pass; `ruff check` and `npm run lint`
+are both clean with no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
 verified manually. The n8n workflow JSONs are corrected and their
@@ -642,5 +652,139 @@ nothing scrolls through Radix). `npm run lint` is clean with no warnings: the tw
 auth provider only**, where they fire on Radix re-exports, a `cva` object and two hooks that must
 live beside their provider. The rule stays on for pages and feature components, where a stray
 non-component export really does cost state on every save.
+
+### Decisions taken in Phase 8 — security hardening and the audit trail
+
+**Brute force — two controls, because there are two attacks:**
+
+- **Per source address: a hard lockout.** Five failures in fifteen minutes and that address gets
+  429 until the oldest ages out. This is the control that actually stops a flood.
+- **Per account: a progressive delay, and never a lock.** The textbook per-account lockout is a
+  trap — it hands anyone a one-request denial of service against any address they can guess, which
+  trades one vulnerability for another. So the account side sleeps (2s, 4s, 8s, capped) and stays
+  answerable to whoever knows the password. It exists for the *distributed* spray, where every
+  request comes from a fresh address and the per-IP counter never fills.
+- **The cap on the delay is not cosmetic.** Each delayed login holds one threadpool thread, so an
+  unbounded backoff is a denial of service inflicted on ourselves. What keeps the number of
+  concurrently-sleeping requests small is the per-IP lockout: a single address dies after five.
+- **The delay is applied to unknown addresses too**, keyed on whatever was typed. Skipping it when
+  the account does not exist would make the delay itself an enumeration oracle — fast means "no
+  such user", slow means "that one is real".
+- **A successful login does not refund the IP budget.** Otherwise an attacker holding one valid
+  account resets their spray allowance at will. It *does* reset the account delay, because that is
+  counted since the account's last success.
+- **A login against a suspended account counts as a failure.** Otherwise a disabled account is an
+  unlimited, unrated oracle for testing passwords.
+- **`X-Forwarded-For` is ignored unless `TRUST_PROXY_HEADER` is set.** It is caller-supplied:
+  trusting it with no proxy guaranteed to overwrite it keys the lockout on a string the attacker
+  chooses — no lockout at all — and simultaneously lets anyone lock out someone else's address by
+  claiming it. Everyone behind one proxy sharing a counter is a usability problem; this is the
+  absence of the feature.
+- **Change-password gets a real lock, and that is consistent, not contradictory.** Reaching the
+  route requires a valid session for that exact account, so only the account holder can spend the
+  budget. Nobody can lock a stranger out of it.
+- **The public `/share/{token}` route is throttled per address, not per token.** It is not a
+  brute-force control — a token is 32 bytes from `secrets` and nobody guesses one — it is a ceiling
+  on what a *leaked* link can be used for, since these are the only unauthenticated reads in the
+  app. Keyed per address because the abuse is one host pulling repeatedly, and per-token keying
+  would give an attacker holding two links two budgets.
+
+**Where the rate-limit state lives — Postgres, and the honest cost:**
+
+- In-process memory is wrong the moment there is a second worker: each replica gets its own
+  counter, so N replicas mean N× the allowed attempts, and a restart clears it.
+- Redis is the conventional answer — O(1), native TTL — but it is a fifth container and a hard
+  dependency that forces a fail-open/fail-closed decision onto the login path.
+- Postgres costs one write and one indexed count per authentication attempt, and has **no automatic
+  expiry**: `python -m app.db.prune` is the answer, and nothing runs it for you. The index makes the
+  window query cheap regardless of table size, so an unpruned table is a disk-space problem rather
+  than a correctness one. This would be the wrong choice for a per-request API limiter.
+- **`at` is stamped by the application, not `func.now()`.** The window arithmetic uses the
+  application clock, and mixing a database clock into one side of the comparison makes the window
+  silently wider or narrower by however far the two containers have drifted.
+
+**The audit log:**
+
+- **Append-only is enforced twice.** No endpoint updates or deletes a row, *and* a Postgres trigger
+  raises on UPDATE, DELETE and TRUNCATE. The trigger is the one that still holds after somebody adds
+  a well-meaning "clean up old entries" endpoint. TRUNCATE needs its own statement-level trigger —
+  it never fires a row-level one, so without it "append-only" is one `TRUNCATE audit_log` from false.
+- **`actor_id` deliberately has no foreign key.** Every other actor reference in this schema
+  cascades on delete, which is right for data a user owns and catastrophic here: deleting a user
+  would erase the record of what that user did — the single most interesting case the log exists
+  for. The uuid is stored unenforced and `actor_label` keeps the address as it read at the time.
+- **A failed login is recorded even though the request raises**, which is the whole difficulty.
+  A route that raises never commits, so `record()` commits itself; call sites therefore call it
+  either right after the business commit or right before raising, so that commit has nothing else
+  pending. Testing this took a third attempt — see below.
+- **A failed login is never attributed to the account as its actor.** Nobody proved they were that
+  user; that is what "failed" means. The account is the *target*, the attempted address is
+  `actor_label`, and `actor_type` is `anonymous`. Recording `actor_id = <that user>` would state in
+  the log that the user did this. Found by reading the rendered page, where "admin@aipcc.io — Login
+  failure" was indistinguishable from something the admin had actually done.
+- **Redaction is enforced, not trusted.** `detail` values are stripped by key name and clipped to
+  500 characters, and anything structured is flattened to a string first so a nested dict cannot
+  smuggle a forbidden key past the check. "Never record document contents" is a length problem as
+  much as a naming one. It redacts rather than raising: an audit write is not the place to turn a
+  programming mistake into a failed request.
+- **Reads of the log are not themselves audited.** Otherwise the page shows its own visit as the
+  newest entry and a scheduled dashboard fills the log with the fact that it looked.
+- **Only integrity *changes* are recorded**, not every check. The FIM engine re-checks on a
+  schedule; logging each verdict would bury the real events under a thousand daily rows saying the
+  file is still fine.
+- **`/audit` is `require_human_admin`**, matching `/users` and `/api-keys`. It is the most useful
+  single read in the application for somebody who should not have it, and a machine key lives in a
+  credential store it can be copied out of.
+- **`POST /auth/logout` does not invalidate anything, and says so.** Access tokens are stateless
+  JWTs; revoking one needs a jti deny-list checked on every request — a real feature with a real
+  cost, not something to imply with an endpoint that returns 204. It exists for the audit line.
+
+**Security headers:**
+
+- **Two CSPs, because the API and its docs are different documents.** The API answers JSON to a
+  fetch, so `default-src 'none'` costs nothing. FastAPI's `/docs` is a real HTML page pulling
+  Swagger UI from jsDelivr with an inline bootstrap, and under the strict policy it renders as a
+  blank page. That is not hypothetical — it is what one CSP for the whole app does, and it is only
+  visible in a browser. `/openapi.json` is data, so it keeps the strict policy.
+- **HSTS only over HTTPS** (or in production behind a terminator). Sending it on `http://localhost`
+  is spec-forbidden and a real foot-gun: a browser that caches HSTS for `localhost` then refuses
+  plain HTTP for every other project on the machine, with no obvious cause.
+- **A pure ASGI middleware, not `BaseHTTPMiddleware`.** The latter wraps every response in an
+  anonymous task and re-emits the body — a lot of machinery to append six constant headers, and the
+  layer that historically interferes with streaming and background tasks.
+- **Added after CORS so it ends up outermost.** `add_middleware` prepends, so the last one added
+  wraps everything — which is what puts headers on responses no route sees: CORS preflights, which
+  `CORSMiddleware` answers itself, and anything an exception handler produces.
+- **The middleware appends and never overwrites.** A route that set its own framing policy knows
+  something the middleware does not.
+- **The SPA's CSP lives in `vite.config.js`,** because Vite is what serves those documents; a header
+  set by FastAPI never reaches a page on :5173. It carries `'unsafe-inline'` for scripts and that is
+  stated rather than hidden — the dev server injects an inline module preamble and the React Refresh
+  runtime, and `ws:` in `connect-src` is HMR. Removing either does not harden the app, it breaks
+  development, which is how a CSP gets deleted. A production build served statically has no inline
+  script and should tighten to hashes or nonces.
+
+**Bugs found in Phase 8:**
+
+- **`timedelta(0)` is falsy.** `prune(older_than=older_than or default)` silently ignored
+  `--days 0` — the only way to clear the table — fell back to the 30-day default, and printed
+  "pruned 0". Found by running the command, not by reading it.
+- **Two audit tests passed on a bug.** The obvious assertion — do the request, then query — cannot
+  detect a missing commit: the test session *is* the route's session, and an intervening query
+  autoflushes the uncommitted row into the same transaction. Confirmed by deleting the commit and
+  watching them still pass. `db.rollback()` after the request is what closes the gap; it discards
+  to the savepoint exactly as closing an uncommitted session would, so only a genuinely committed
+  row survives. Both tests now fail without their commit.
+- **The audit tests were only correct on an empty machine.** Running the app locally for five
+  minutes leaves a dozen real rows, and `len(entries) == 1` then fails — the same trap the Phase 4
+  dashboard tests already paid for. Scoped with an autouse baseline timestamp. This is the one table
+  where the usual escape hatch does not exist: you cannot delete the noise, because the trigger
+  refuses to.
+
+**Verified in a browser, not by reading:** `/docs` renders fully under the relaxed policy; the SPA
+loads with fonts, ambient video and HMR intact and no CSP violations in the console; and a live
+sequence of failed logins against the running server showed 401 at ~510 ms for the first three,
+2.5 s on the fourth, 4.5 s on the fifth and `429` with `Retry-After: 891` on the sixth, all of it
+landing in the audit view.
 
 **Update this section at the end of every phase.**
