@@ -235,11 +235,21 @@ running backend using a real service key — store, download-by-id,
 download-by-name, integrity PATCH and alert POST all answer correctly on the
 credential the workflows use, and `/users` correctly refuses it.
 
-**The workflow JSONs themselves have not been executed inside n8n.** That needs
-a configured n8n instance plus live Groq, AbuseIPDB and VirusTotal credentials.
-They are valid JSON with a connected node graph and corrected endpoints, bodies
-and auth — treat the first import as something to watch, not as a regression
-test that has already passed.
+**All three workflows have since been executed inside n8n** against a running
+backend, with live Groq, AbuseIPDB and VirusTotal credentials. Captures of those
+runs are in `docs/images/` and are referenced from the README:
+
+| Workflow | Run |
+|---|---|
+| Simple Report Generator | Produces a real `.docx` over the webhook — `generated-docx-report.png` |
+| AI Security Report Orchestrator | Full graph green, succeeded in 2.082 s — `n8n-orchestrator-execution.png`, with the store node's input and stored output in `n8n-orchestrator-store-node.png` |
+| FIM & Audit Engine | Swept 47 reports through hash → compare → SEALED — `n8n-fim-execution.png` |
+
+These are still workflow runs, not a regression test: nothing in CI executes
+them, and they will need re-checking after any change to the endpoints below.
+What CI does guarantee is that the endpoint contracts still hold, and that no
+committed workflow JSON carries an embedded credential
+(`tests/test_foundation.py::TestNoEmbeddedCredentials`).
 
 ---
 

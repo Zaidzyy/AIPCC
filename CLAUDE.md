@@ -223,7 +223,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–14 complete and merged — README and screenshots deliberately still not written.**
+**Phases 0–15 complete and merged. The project is finished.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -271,14 +271,15 @@ instead of restarting, and the non-streaming `POST /generate_report` untouched f
 timeline columns plus the citations Phase 10 recorded, with no second extraction pass, an identity
 rule that refuses to merge two principals on anything short of a log row saying they are the same,
 risk inherited from the findings that touch each node, and a force-directed SVG view behind its own
-lazy boundary.** 613 backend tests and 66 frontend tests pass; `ruff check` and `npm run lint` are both clean with
-no warnings.
+lazy boundary,
+**and the README — the honest rebuild framing, a one-command quickstart, an architecture diagram,
+eighteen captioned screenshots from real runs, and a "what this does not do" section — plus a
+LICENSE.** 616 backend tests and 66 frontend tests pass; `ruff check` and `npm run lint` are both
+clean with no warnings.
 
-Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
-verified manually. The n8n workflow JSONs are corrected and their
-endpoint contracts are covered by tests and verified against a running backend with a real service
-key, but the workflows themselves have not been executed inside n8n — that needs live Groq,
-AbuseIPDB and VirusTotal credentials. See `n8n/IMPORT.md` > Verification status.
+All three n8n workflows have now been executed inside n8n against a running backend with live Groq,
+AbuseIPDB and VirusTotal credentials; the captures are in `docs/images/` and `n8n/IMPORT.md` >
+Verification status has been corrected accordingly. Nothing in CI executes them.
 
 Seed credentials: `admin@aipcc.io` / `admin` (`python -m app.db.seed`).
 Add `--ingest` to embed the sample CSV — without it the document is registered but has no chunks,
@@ -1416,5 +1417,52 @@ weighting would look like a feature nobody built.
 named users, isolated timeline hosts kept on canvas, protocol-labelled edges, amber and cyan nodes
 against graphite unrated ones — and clicking `10.14.9.11` dims the rest, shows `HOST / ADDRESS ·
 HIGH · 1 observation`, its two edges, and its two findings labelled `mention` and `source`.
+
+### Decisions taken in Phase 15 — the README
+
+- **The rebuild framing is the opening, not a footnote.** "Rebuilt from a university group
+  prototype" with the link, the specific defects named, and the note that the six worst are
+  enforced by tests. A README that hides its origin invites the reader to discover it; one that
+  states it up front is the stronger claim, and it is the one PORTING.md asked for.
+- **Live figures lead; the CI cassette is quarantined behind a purpose column.** A skimmer must
+  never meet "75% hallucination" without immediate context, so *Headline numbers* carries only the
+  live `gemini-2.5-flash` run (0.0% / 100%) and the Evaluation section opens by pointing back at
+  it. The comparison table has a **Purpose** row — "validator regression harness" against "model
+  measurement" — because the two numbers answer different questions and a table without it invites
+  reading them as better-and-worse.
+- **`docs/images/` is 18 captions, and every caption says what to notice.** Not "the ATT&CK
+  matrix" but "`T1022` is deprecated, `T1888` does not exist, so they are named rather than
+  silently discarded". A caption that only labels the image wastes the one moment the reader is
+  already looking.
+- **The screenshots are of the honesty features wherever there was a choice.** Amber "Ungrounded"
+  markers, the unverified-technique dialog quoting the validator verbatim, `total tokens
+  [redacted]` in the audit log, the `REPLAYED` badge on the Evaluation page, `No enrichment for
+  this report`. Those are the most interesting thing in the product and they are framed as the
+  system showing its work — which is why the `--demo` seed's three deliberately defective
+  identifiers exist at all.
+- **Every number was re-measured for this phase rather than copied from here.** That caught three
+  stale figures: 613 backend tests is now **616**, the sample CSV is **195** chunks and not 197,
+  and the CI job count is **four**, not three. Bundle sizes come from an actual `npm run build`
+  (entry 662.37 kB / 203.52 kB gzipped; ChartGrid 410.73 kB; GraphCanvas 17.47 kB / 6.88 kB).
+- **`n8n/IMPORT.md` > Verification status was false and was corrected in the same commit.** It
+  still said the workflows had never been executed inside n8n; all three have, and the captures
+  are committed. The replacement says what the runs do *not* prove — nothing in CI executes them —
+  rather than upgrading them to "tested".
+- **A live share link was created for the screenshot and revoked immediately after.** The token is
+  partly legible in `share-dialog.jpg`; it is a localhost URL and now inert, but a live capability
+  token does not belong in a public repository under any reading.
+- **The "what this does not do" section is EVAL.md's, widened.** Unevaluated retrieval, one
+  synthetic CSV, replay saying nothing about the current model, unverified CVE existence, the
+  Navigator layer never opened in the real Navigator, `logout` not revoking, and Postgres-backed
+  rate limiting being the wrong choice for a per-request limiter. It closes on the prototype's
+  README claiming Ollama and AES-256 that never existed, because not repeating that is most of the
+  reason the section is there.
+- **MIT LICENSE, with the vendored data carved out.** The MITRE catalogues are not ours to
+  sublicense; the licence points at `SOURCES.md` rather than restating terms that could drift.
+- **Screenshots are captured at 1512×982 from the real app on the demo seed**, and one report was
+  generated live through the streaming UI during capture — which is where the evidence-citation
+  screenshot (`ROWS 52–56 · CHUNK 10` over real log lines) and the $0.017 on the cost chart come
+  from. That run came back `partial` with two empty sections, and it was left that way rather than
+  re-rolled for a prettier screenshot.
 
 **Update this section at the end of every phase.**
