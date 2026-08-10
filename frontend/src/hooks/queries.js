@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
 
 import {
   alertsApi,
@@ -237,23 +238,24 @@ export function useReport(reportId) {
   });
 }
 
-export function useGenerateReport() {
+/**
+ * Caches invalidated by a finished generation.
+ *
+ * Exported rather than living inside a mutation because the browser now
+ * generates over the SSE stream (`useGenerationStream`), which is not a
+ * TanStack mutation and has no `onSuccess` to hang this on. It runs on failure
+ * too: a failed generation still persists a report row with status "failed",
+ * so the history list and the aggregates have changed either way.
+ */
+export function useInvalidateAfterGeneration() {
   const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: reportsApi.generate,
-    onSuccess: (report) => {
-      queryClient.setQueryData(keys.report(report.report_id), report);
-      queryClient.invalidateQueries({ queryKey: keys.reports });
-      // Every aggregate on the dashboard is now one report out of date.
-      queryClient.invalidateQueries({ queryKey: keys.dashboard });
-    },
-    // A failed generation still persists a report row with status "failed",
-    // so the history list and the aggregates have changed either way.
-    onError: () => {
-      queryClient.invalidateQueries({ queryKey: keys.reports });
-      queryClient.invalidateQueries({ queryKey: keys.dashboard });
-    },
-  });
+  return useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: keys.reports });
+    // Every aggregate on the dashboard is now one report out of date, and so
+    // is the ATT&CK matrix.
+    queryClient.invalidateQueries({ queryKey: keys.dashboard });
+    queryClient.invalidateQueries({ queryKey: ["attack", "detections"] });
+  }, [queryClient]);
 }
 
 export function useDeleteReport() {

@@ -16,19 +16,14 @@ export async function status(reportId) {
   return data;
 }
 
-/**
- * Generate a report. Five LLM sections run concurrently on the backend, so
- * this is a long request — the default axios timeout of none is intentional.
- * It answers 502 with a structured detail when every section fails.
+/*
+ * There is no `generate()` here any more. The browser generates over the SSE
+ * stream in `lib/api/stream.js`, which cannot go through axios — axios buffers
+ * the whole body before it resolves, which is exactly what a stream exists to
+ * avoid. `POST /generate_report` still exists on the backend for n8n and other
+ * API clients and is covered by the backend suite; nothing in this app calls
+ * it, and keeping a wrapper nobody uses would only invite one.
  */
-export async function generate({ documentId, reportName, classification }) {
-  const { data } = await apiClient.post("/generate_report", {
-    document_id: documentId,
-    report_name: reportName,
-    classification,
-  });
-  return data;
-}
 
 export async function remove(reportId) {
   await apiClient.delete(`/reports/${reportId}`);

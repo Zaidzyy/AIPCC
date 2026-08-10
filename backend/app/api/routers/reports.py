@@ -10,6 +10,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from fastapi.responses import StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,9 +27,9 @@ from app.schemas.report import (
     ReportSummary,
     StoreGeneratedReportRequest,
 )
-from app.services import audit, export
+from app.services import audit, export, report_stream
 from app.services.report import generate_report
-from app.services.report_storage import load_report_detail, store_report
+from app.services.report_storage import load_report_detail, reserve_report, store_report
 
 router = APIRouter(tags=["reports"])
 
@@ -106,6 +107,53 @@ async def generate_report_endpoint(
     detail = load_report_detail(db, report)
     detail.errors = result.errors
     return detail
+
+
+@router.post("/generate_report/stream", response_class=StreamingResponse)
+async def generate_report_stream(
+    payload: GenerateReportRequest,
+    request: Request,
+    user: models.Users = Depends(get_current_user),
+    db: Session = Depends(get_db),
+) -> StreamingResponse:
+    """The same generation, watched rather than waited for.
+
+    An **addition**, not a replacement: `POST /generate_report` is unchanged and
+    remains what n8n and any other API client call. A workflow has nobody
+    watching it, so a stream would be a protocol tax on a machine.
+
+    Authorization happens here, before the response body starts, because a 403
+    delivered as an SSE frame inside a 200 is a status code that lies. By the
+    time the first byte is written, the caller has been resolved from their
+    token and checked against the document, and the report row exists.
+    """
+    document = db.get(models.Document, payload.document_id)
+    if document is None:
+        raise HTTPException(404, f"document {payload.document_id} not found")
+    authorize_owner(user, document.user_id)
+
+    report = reserve_report(
+        db,
+        document_id=payload.document_id,
+        user_id=user.user_id,
+        report_name=payload.report_name,
+        classification=payload.classification,
+    )
+
+    return StreamingResponse(
+        report_stream.stream_generation(
+            report=report, payload=payload, user_id=user.user_id, request=request
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache, no-transform",
+            "Connection": "keep-alive",
+            # nginx buffers proxied responses by default, which turns a live
+            # stream into one delivery at the end — the exact failure this
+            # endpoint exists to avoid, and invisible in development.
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @router.post("/store_generated_report", response_model=ReportDetail, status_code=201)

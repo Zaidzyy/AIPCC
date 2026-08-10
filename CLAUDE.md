@@ -66,6 +66,7 @@ backend/
       llm/                  # LLMProvider abstraction + implementations
       export/               # layout.py (one document model) + pdf_writer + docx_writer
       report.py             # parallel section generation, validation, retry
+      report_stream.py      # SSE progress: the generation task, and the frames it publishes
       analytics.py          # dashboard aggregation — GROUP BY in SQL, never ORM loops
       severity.py           # the free-text severity ladder, defined once
       chatbot.py            # chat over ingested docs
@@ -104,6 +105,7 @@ frontend/
                             #   share view), ExportMenu, ShareDialog, classification
     context/AuthContext.jsx # token + current user; the only source of "who am I"
     hooks/queries.js        # every TanStack Query hook and its query keys
+    hooks/useGenerationStream.js  # the SSE run: live sections, reconnect, resume
     routes/                 # ProtectedRoute, AdminRoute
     pages/                  # one file per route
     lib/apiClient.js        # axios instance, JWT interceptor, 401 handling
@@ -219,7 +221,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–12 complete and merged — README and screenshots deliberately still not written.**
+**Phases 0–13 complete and merged — README and screenshots deliberately still not written.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -258,8 +260,12 @@ gate that needs no API key and an in-app Evaluation page,
 **and the MITRE ATT&CK matrix — tactics and the tactic→technique grid vendored from the same
 pinned ATT&CK release the validator reads, per-report and aggregate detection endpoints, a
 readable 14-column matrix whose cells trace back to the findings behind them, and an ATT&CK
-Navigator layer export validated against a JSON Schema derived from MITRE's published spec.**
-554 backend tests and 52 frontend tests pass; `ruff check` and `npm run lint` are both clean with
+Navigator layer export validated against a JSON Schema derived from MITRE's published spec,
+**and streamed report generation — the five concurrent sections surfaced over SSE with per-section
+started / retrying / completed / failed events, a visible repair retry, a report row reserved
+before the first byte so a dropped connection reconnects through `GET /reports/{id}/status`
+instead of restarting, and the non-streaming `POST /generate_report` untouched for API clients.**
+568 backend tests and 62 frontend tests pass; `ruff check` and `npm run lint` are both clean with
 no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
@@ -1210,5 +1216,97 @@ scoping narrowing it to 3 techniques over 4 detections, and the exported layer v
 the derived schema. **Not verified:** the layer has not been opened in the live ATT&CK Navigator —
 the browser tooling available here refuses `mitre-attack.github.io` — so what is proven is
 conformance to the published format, not the round trip through MITRE's app.
+
+### Decisions taken in Phase 13 — streaming report generation
+
+**The transport:**
+
+- **SSE, not WebSocket.** The traffic is one-directional and short-lived — the server has things to
+  say, the client has nothing to send after the request that started it. SSE is that shape exactly,
+  it is plain HTTP so it survives proxies and the existing CSP, and it adds no second protocol to
+  the deployment story. A WebSocket would buy bidirectionality nobody wants and cost an upgrade
+  handshake intermediaries mishandle.
+- **POST + `fetch` + `ReadableStream`, not `EventSource`.** `EventSource` cannot set an
+  `Authorization` header, and its only workaround is a token in the query string — which this
+  project refuses on principle and which would be worse than a principle here, because
+  `core/logging.py` writes a request line for every call. Thirty extra lines of client keep the JWT
+  out of the URL, the access log and the browser history. `lib/api/stream.js` is the one module in
+  the app that does not go through the axios client: axios buffers the whole body before it
+  resolves, which is exactly what a stream exists to avoid.
+- **`X-Accel-Buffering: no` on the response.** nginx buffers proxied responses by default, which
+  turns a live stream into one delivery at the end — the precise failure this endpoint exists to
+  prevent, and invisible in development.
+
+**Where the work runs — the decision the rest follows from:**
+
+- **Generation does not live in the response body.** The likeliest failure of a two-minute stream is
+  that the client goes away: a sleeping laptop, a closed tab, a proxy timeout. If the work were
+  driven by the response generator, Starlette closing it would abandon a report mid-write. So the
+  generation *and its storage* run in an `asyncio.Task` with its own session, and the response body
+  only forwards what that task publishes. Hanging up costs the events, never the report.
+- **The report row is reserved before the first byte.** `reserve_report` writes a row in
+  `generating` — a status the column has documented since Phase 0 and that nothing had ever written
+  — and its id goes out in the opening frame. That is what makes reconnection possible at all: an
+  id that exists only once generation *finishes* is no use to somebody whose connection dropped
+  halfway. The client falls back to `GET /reports/{id}/status` and **never restarts generation**,
+  which would pay for the same report twice and store it twice.
+- **The task is held in a module-level set.** The event loop keeps only a weak reference, so a long
+  generation can be garbage-collected mid-flight — an asyncio foot-gun whose symptom is a report
+  that silently never appears.
+- **`store_report` gained an optional `report=`, rather than a second storage function.** The
+  section, evidence and usage writes are the part that must never differ between the app path, the
+  n8n path and the streaming path; a second copy of them is precisely how the prototype's field
+  names drifted.
+- **A reserved row is never left in `generating`.** Any exception marks it `failed` — "still
+  running" attached to something that is not running is the one state a status endpoint cannot
+  describe honestly.
+
+**The events:**
+
+- **Guaranteed order:** `started` once, then per-section frames, then exactly one `stored`. A client
+  that has seen `stored` knows the report is written; one that has not knows only that it might be.
+- **`retrying` is the point of the feature, not a leak.** A section failing validation and coming
+  back on the repair prompt is this system demonstrating the robustness it has claimed since
+  Phase 1, and a spinner hides it completely. The frame carries the attempt number and the stage
+  and reason the first attempt was rejected, verbatim.
+- **`completed` is emitted after grounding resolves, not after the model returns.** A terminal
+  event that arrives before the work behind it finishes is the standard way a progress stream ends
+  up lying — and it lets the row show "3 findings · 3 ungrounded" while the run is still going.
+- **`elapsed_ms` is per section, measured from that section's own start.** The five run
+  concurrently; a clock shared between them would say nothing about any of them.
+- **A failure carries the typed `SectionError`, not a string.** The stage is what separates a
+  provider outage from a model that will not produce valid JSON, and the UI shows the two
+  differently.
+- **The progress hook can never fail a section.** A stream nobody is reading is not a reason to
+  lose a report that generated correctly, so `emit` swallows and logs.
+- **A heartbeat comment every 15 s.** A section can take 90 s and an idle connection is what proxies
+  reap; three bytes, ignored by every client.
+
+**Frontend:**
+
+- **All five sections are listed as pending from the opening frame.** A list that grows as results
+  land reflows on every event and hides how much is still outstanding.
+- **The live counter is client-side; the settled number is the server's.** Only the server knows how
+  long the work took, and only the client can tick while it is still taking it. The server's
+  `elapsed_ms` on `started` is always ~0, and a number frozen at `0.0s` beside a spinner reads as
+  broken — which is exactly how it looked in the first live run.
+- **The in-flight report id is written to `sessionStorage`**, so navigating away and back resumes
+  the status poll rather than losing the run. Session-scoped, not local: a generation in flight is
+  not interesting in another tab next week.
+- **The clock is held in state, never read during render.** `Date.now()` in a render body is not a
+  pure function of props, and the lint rule that says so is right.
+- **`useGenerateReport` and `reportsApi.generate` were deleted rather than left unused.** The
+  browser now only streams; `POST /generate_report` remains for n8n and other API clients and is
+  covered by the backend suite. Their cache invalidation became
+  `useInvalidateAfterGeneration`, which the stream calls on its terminal frame — and which now also
+  invalidates the ATT&CK matrix, since a new report changes it too.
+
+**Verified by running**, against a real local model rather than a fake: five rows filling in live
+with per-section timers, `Timeline complete 47.0s · 5 findings` while three others were still
+analysing, `3 findings · 3 ungrounded` in amber, automatic navigation to the finished report — and,
+on a weaker model, two sections showing **"Retrying — repair prompt · First attempt rejected —
+validation: every item was empty; the all-null template was returned instead of findings from the
+log data"**, which is the exact event this phase exists to surface. A Gemini run with three
+sections rate-limited exercised the `failed` path with a real provider error and stored `partial`.
 
 **Update this section at the end of every phase.**
