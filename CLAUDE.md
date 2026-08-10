@@ -251,7 +251,7 @@ citations validated against what the model was actually shown, fabricated citati
 every finding's source log rows visible in the UI,
 **and an evaluation harness measuring hallucination and grounding rates against the real published
 MITRE ATT&CK and CWE catalogues and a hand-labelled golden log, with a deterministic replayed CI
-gate that needs no API key and an in-app Evaluation page.** 521 backend tests and 42 frontend
+gate that needs no API key and an in-app Evaluation page.** 523 backend tests and 42 frontend
 tests pass; `ruff check` and `npm run lint` are both clean with no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
