@@ -27,6 +27,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
@@ -449,3 +450,91 @@ class Message(Base):
     )
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
+
+
+class AuthAttempt(Base):
+    """One authentication attempt, kept only long enough to rate-limit on.
+
+    This is rate-limit *state*, not the audit trail — `AuditLog` is that, and
+    it is append-only and permanent. These rows are counted inside a sliding
+    window and pruned; see `services/ratelimit.py`.
+
+    `identifier` holds a source address or a lowercased email, never a password
+    and never a token. There is no foreign key to `users`: an attempt against
+    an address nobody has registered is exactly the attempt worth counting.
+
+    `at` is stamped by the application rather than by `func.now()` on purpose.
+    The window arithmetic uses the application clock, and mixing a database
+    clock into one side of a comparison makes the window silently wider or
+    narrower by however far the two containers have drifted.
+    """
+
+    __tablename__ = "auth_attempts"
+
+    attempt_id: Mapped[uuid.UUID] = _pk()
+    # ip | account
+    scope: Mapped[str] = mapped_column(String(20), nullable=False)
+    identifier: Mapped[str] = mapped_column(String(255), nullable=False)
+    # login | register | password_change | share
+    action: Mapped[str] = mapped_column(String(40), nullable=False)
+    successful: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        # Every read is "count rows for this (scope, identifier, action) newer
+        # than T", so the index carries all four columns in that order.
+        Index("ix_auth_attempts_window", "scope", "identifier", "action", "at"),
+        # Pruning scans by age alone.
+        Index("ix_auth_attempts_at", "at"),
+    )
+
+
+class AuditLog(Base):
+    """Append-only record of security-relevant actions.
+
+    Immutability is enforced twice, because one of the two is only a
+    convention: the API exposes no update or delete path, *and* a Postgres
+    trigger raises on UPDATE or DELETE against this table. The trigger is the
+    one that survives somebody adding a well-meaning admin endpoint later.
+
+    **There is deliberately no foreign key on `actor_id`.** Every other actor
+    reference in this schema cascades on delete, which is right for data owned
+    by a user and catastrophic here: deleting a user would erase the record of
+    what that user did, which is the single most interesting case the log
+    exists for. The uuid is stored unenforced and `actor_label` keeps the
+    address as it read at the time, so a deleted actor stays legible.
+
+    `correlation_id` is unused in Phase 8 and filled in by Phase 9's request
+    middleware. The column exists now so the log does not need a migration to
+    become traceable.
+
+    What must never land here: passwords, JWTs, API key secrets, share tokens,
+    or document contents. `services/audit.py` redacts by key name and caps
+    value length rather than trusting call sites.
+    """
+
+    __tablename__ = "audit_log"
+
+    audit_id: Mapped[uuid.UUID] = _pk()
+    at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    # Dotted and closed — see `services/audit.py::ACTIONS`.
+    action: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    # success | failure | blocked
+    outcome: Mapped[str] = mapped_column(String(20), nullable=False)
+    # user | api_key | anonymous | system
+    actor_type: Mapped[str] = mapped_column(String(20), nullable=False)
+    actor_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, index=True)
+    # The actor's email (or an attempted one) as it read at the time.
+    actor_label: Mapped[str | None] = mapped_column(String(255))
+    target_type: Mapped[str | None] = mapped_column(String(60))
+    # A string, not a uuid: targets are heterogeneous and some are not rows.
+    target_id: Mapped[str | None] = mapped_column(String(64))
+    source_ip: Mapped[str | None] = mapped_column(String(64))
+    correlation_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    detail: Mapped[dict | None] = mapped_column(JSON)
+
+    __table_args__ = (
+        # The admin view filters by actor and by action, newest first.
+        Index("ix_audit_log_actor_at", "actor_id", "at"),
+        Index("ix_audit_log_action_at", "action", "at"),
+    )

@@ -2,6 +2,7 @@ import {
   FileText,
   LayoutDashboard,
   MessageSquare,
+  ScrollText,
   Settings,
   ShieldAlert,
   ShieldCheck,
@@ -32,7 +33,10 @@ const GROUPS = [
   {
     label: "Administration",
     adminOnly: true,
-    items: [{ to: "/users", label: "Users", icon: Users }],
+    items: [
+      { to: "/users", label: "Users", icon: Users },
+      { to: "/audit", label: "Audit log", icon: ScrollText },
+    ],
   },
   {
     label: "Account",

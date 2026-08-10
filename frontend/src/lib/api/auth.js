@@ -20,6 +20,16 @@ export async function register(payload) {
   return data;
 }
 
+/**
+ * Records the end of a session in the audit trail. It does **not** invalidate
+ * the token — access tokens are stateless JWTs and stay valid until they
+ * expire, whatever this call does. The client still clears its own copy; this
+ * is purely so "signed out at 14:02" exists to compare against later activity.
+ */
+export async function logout() {
+  await apiClient.post("/auth/logout");
+}
+
 export async function me() {
   const { data } = await apiClient.get("/auth/me");
   return data;

@@ -85,9 +85,44 @@ describe("AuthContext", () => {
     await waitFor(() => expect(screen.getByTestId("admin")).toHaveTextContent("true"));
   });
 
+  it("tells the server the session ended, for the audit trail", async () => {
+    setToken("stored");
+    mock.onGet("/auth/me").reply(200, ANALYST);
+    mock.onPost("/auth/logout").reply(204);
+
+    renderAuth();
+    await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("in"));
+
+    await act(async () => {
+      screen.getByText("sign out").click();
+    });
+
+    expect(mock.history.post.filter((r) => r.url === "/auth/logout")).toHaveLength(1);
+  });
+
+  it("signs out locally even when the logout call fails", async () => {
+    setToken("stored");
+    mock.onGet("/auth/me").reply(200, ANALYST);
+    // A dead or slow API must never be able to keep somebody signed in. The
+    // token in storage is what actually ends the session; the server call is
+    // only there so the audit log has the event.
+    mock.onPost("/auth/logout").networkError();
+
+    renderAuth();
+    await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("in"));
+
+    await act(async () => {
+      screen.getByText("sign out").click();
+    });
+
+    expect(getToken()).toBeNull();
+    expect(screen.getByTestId("state")).toHaveTextContent("out");
+  });
+
   it("clears the token and the previous user's data on logout", async () => {
     setToken("stored");
     mock.onGet("/auth/me").reply(200, ANALYST);
+    mock.onPost("/auth/logout").reply(204);
 
     const { queryClient } = renderAuth();
     await waitFor(() => expect(screen.getByTestId("state")).toHaveTextContent("in"));

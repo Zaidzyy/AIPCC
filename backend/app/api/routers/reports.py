@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -26,7 +26,7 @@ from app.schemas.report import (
     ReportSummary,
     StoreGeneratedReportRequest,
 )
-from app.services import export
+from app.services import audit, export
 from app.services.report import generate_report
 from app.services.report_storage import load_report_detail, store_report
 
@@ -35,26 +35,48 @@ router = APIRouter(tags=["reports"])
 
 @router.post("/generate_report", response_model=ReportDetail, status_code=201)
 async def generate_report_endpoint(
-    request: GenerateReportRequest,
+    payload: GenerateReportRequest,
+    request: Request,
     user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ReportDetail:
     """Generate all five sections concurrently and persist them."""
-    document = db.get(models.Document, request.document_id)
+    document = db.get(models.Document, payload.document_id)
     if document is None:
-        raise HTTPException(404, f"document {request.document_id} not found")
+        raise HTTPException(404, f"document {payload.document_id} not found")
     authorize_owner(user, document.user_id)
 
-    result = await generate_report(str(request.document_id))
+    result = await generate_report(str(payload.document_id))
 
     report = store_report(
         db,
-        document_id=request.document_id,
+        document_id=payload.document_id,
         user_id=user.user_id,
-        report_name=request.report_name,
-        classification=request.classification,
+        report_name=payload.report_name,
+        classification=payload.classification,
         sections=result.sections,
         errors=result.errors,
+    )
+
+    # Recorded before the 502 below, so a generation that produced nothing is
+    # still in the log. "Reports that were attempted and failed" is a question
+    # about the system's health that a success-only log cannot answer.
+    audit.record(
+        db,
+        action=audit.REPORT_CREATE,
+        outcome=audit.SUCCESS if not result.sections.is_empty() else audit.FAILURE,
+        request=request,
+        actor=user,
+        target_type="report",
+        target_id=report.report_id,
+        detail={
+            "report_name": report.report_name,
+            "document_id": str(payload.document_id),
+            "classification": report.classification,
+            "status": report.status,
+            "origin": "app",
+            "section_errors": len(result.errors),
+        },
     )
 
     if result.sections.is_empty():
@@ -76,7 +98,8 @@ async def generate_report_endpoint(
 
 @router.post("/store_generated_report", response_model=ReportDetail, status_code=201)
 def store_generated_report(
-    request: StoreGeneratedReportRequest,
+    payload: StoreGeneratedReportRequest,
+    request: Request,
     user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ReportDetail:
@@ -85,19 +108,39 @@ def store_generated_report(
     Shares `store_report` with the Python path, so a report from n8n and one
     from the app land in the same tables in the same shape.
     """
-    document = db.get(models.Document, request.document_id)
+    document = db.get(models.Document, payload.document_id)
     if document is None:
-        raise HTTPException(404, f"document {request.document_id} not found")
+        raise HTTPException(404, f"document {payload.document_id} not found")
     authorize_owner(user, document.user_id)
 
     report = store_report(
         db,
-        document_id=request.document_id,
+        document_id=payload.document_id,
         user_id=user.user_id,
-        report_name=request.report_name,
-        classification=request.classification,
-        sections=request.sections,
-        threat_intel=request.threat_intel,
+        report_name=payload.report_name,
+        classification=payload.classification,
+        sections=payload.sections,
+        threat_intel=payload.threat_intel,
+    )
+
+    # `origin` distinguishes this from the app path. The two write identical
+    # rows by design, so without it the log cannot answer "did a workflow do
+    # this, or did a person?" — and `actor_type` alone will not, since a human
+    # admin can call this endpoint too.
+    audit.record(
+        db,
+        action=audit.REPORT_CREATE,
+        request=request,
+        actor=user,
+        target_type="report",
+        target_id=report.report_id,
+        detail={
+            "report_name": report.report_name,
+            "document_id": str(payload.document_id),
+            "classification": report.classification,
+            "status": report.status,
+            "origin": "n8n",
+        },
     )
     return load_report_detail(db, report)
 
@@ -105,7 +148,8 @@ def store_generated_report(
 @router.patch("/api/report/integrity/{report_id}", response_model=ReportStatusResponse)
 def update_report_integrity(
     report_id: uuid.UUID,
-    request: IntegrityUpdate,
+    payload: IntegrityUpdate,
+    request: Request,
     user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ReportStatusResponse:
@@ -120,17 +164,36 @@ def update_report_integrity(
     caller set it would let a stale check present itself as a fresh one.
     """
     report = _get_authorized_report(db, user, report_id)
-    report.integrity_state = request.integrity_state
+    previous = report.integrity_state
+    report.integrity_state = payload.integrity_state
     report.integrity_checked_at = datetime.now(timezone.utc)
-    if request.observed_hash and request.integrity_state == "TAMPERED":
+    if payload.observed_hash and payload.integrity_state == "TAMPERED":
         # Keep the evidence with the verdict. The sealed hash stays in
         # `file_hash`; this is what the file hashes to now.
         report.error_detail = (
             f"integrity mismatch: sealed {report.file_hash or 'unknown'}, "
-            f"observed {request.observed_hash}"
+            f"observed {payload.observed_hash}"
         )
     db.commit()
     db.refresh(report)
+
+    # Only a *change* is recorded, which is what the phase brief asks for and
+    # also the only thing that is readable. The FIM engine re-checks on a
+    # schedule, so logging every verdict would bury nineteen real events under
+    # a thousand rows a day saying the file is still fine.
+    if previous != report.integrity_state:
+        audit.record(
+            db,
+            action=audit.INTEGRITY_CHANGE,
+            outcome=(
+                audit.FAILURE if report.integrity_state == "TAMPERED" else audit.SUCCESS
+            ),
+            request=request,
+            actor=user,
+            target_type="report",
+            target_id=report.report_id,
+            detail={"from": previous, "to": report.integrity_state},
+        )
     return ReportStatusResponse.model_validate(report)
 
 
@@ -171,6 +234,7 @@ def get_report_status(
 )
 def export_report(
     report_id: uuid.UUID,
+    request: Request,
     format: export.ExportFormat = "pdf",
     user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
@@ -187,13 +251,27 @@ def export_report(
     source = export.source_from_detail(
         detail, document_name=report.document.document_name if report.document else None
     )
+
+    # An export is the moment a report leaves this system, so its
+    # classification is recorded alongside it: "who took a Confidential report
+    # out, and when" is the question this row exists to answer.
+    audit.record(
+        db,
+        action=audit.REPORT_EXPORT,
+        request=request,
+        actor=user,
+        target_type="report",
+        target_id=report.report_id,
+        detail={"format": format, "classification": report.classification},
+    )
     return as_download(export.render(source, format))
 
 
 @router.patch("/reports/{report_id}/classification", response_model=ReportSummary)
 def set_classification(
     report_id: uuid.UUID,
-    request: ClassificationUpdate,
+    payload: ClassificationUpdate,
+    request: Request,
     user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> ReportSummary:
@@ -206,9 +284,20 @@ def set_classification(
     expects. Revoking on write would silently destroy links instead.
     """
     report = _get_authorized_report(db, user, report_id)
-    report.classification = request.classification
+    previous = report.classification
+    report.classification = payload.classification
     db.commit()
     db.refresh(report)
+
+    audit.record(
+        db,
+        action=audit.REPORT_CLASSIFY,
+        request=request,
+        actor=user,
+        target_type="report",
+        target_id=report.report_id,
+        detail={"from": previous, "to": report.classification},
+    )
     return ReportSummary.model_validate(report)
 
 
@@ -235,12 +324,29 @@ def get_report_by_id(
 @router.delete("/reports/{report_id}", status_code=204)
 def delete_report(
     report_id: uuid.UUID,
+    request: Request,
     user: models.Users = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> None:
     report = _get_authorized_report(db, user, report_id)
+    # Captured before the delete cascades it away.
+    deleted = {
+        "report_name": report.report_name,
+        "classification": report.classification,
+        "owner_id": str(report.user_id),
+    }
     db.delete(report)
     db.commit()
+
+    audit.record(
+        db,
+        action=audit.REPORT_DELETE,
+        request=request,
+        actor=user,
+        target_type="report",
+        target_id=report_id,
+        detail=deleted,
+    )
 
 
 def _get_authorized_report(

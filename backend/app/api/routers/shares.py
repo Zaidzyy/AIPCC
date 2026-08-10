@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 
 from app.api.deps import authorize_owner, require_human
@@ -25,7 +25,7 @@ from app.db import models
 from app.db.session import get_db
 from app.schemas.report import ThreatIntelItem
 from app.schemas.share import ShareCreate, ShareCreated, SharedReport, ShareLink
-from app.services import export, share
+from app.services import audit, export, ratelimit, share
 from app.services.report_storage import load_report_sections
 
 router = APIRouter(tags=["shares"])
@@ -37,16 +37,36 @@ router = APIRouter(tags=["shares"])
 @router.post("/reports/{report_id}/shares", response_model=ShareCreated, status_code=201)
 def create_share(
     report_id: uuid.UUID,
-    request: ShareCreate,
+    payload: ShareCreate,
+    request: Request,
     user: models.Users = Depends(require_human),
     db: Session = Depends(get_db),
 ) -> ShareCreated:
     """Mint a read-only link. The token is returned once and never again."""
     report = _get_authorized_report(db, user, report_id)
     try:
-        record, token = share.create_share(db, report=report, creator=user, request=request)
+        record, token = share.create_share(db, report=report, creator=user, request=payload)
     except share.ShareForbidden as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
+
+    # The token is emphatically not in this row — it is a capability, and a
+    # capability written to a table an admin can read is a capability an admin
+    # can use. `share_id` identifies the link; `override_justification` records
+    # the decision that a Confidential report could leave the system at all.
+    audit.record(
+        db,
+        action=audit.SHARE_CREATE,
+        request=request,
+        actor=user,
+        target_type="share",
+        target_id=record.share_id,
+        detail={
+            "report_id": str(report.report_id),
+            "classification": record.classification_at_share,
+            "expires_at": record.expires_at,
+            "justification": record.override_justification,
+        },
+    )
 
     return ShareCreated(
         **_link(record).model_dump(),
@@ -68,6 +88,7 @@ def list_shares(
 @router.delete("/shares/{share_id}", response_model=ShareLink)
 def revoke_share(
     share_id: uuid.UUID,
+    request: Request,
     user: models.Users = Depends(require_human),
     db: Session = Depends(get_db),
 ) -> ShareLink:
@@ -83,21 +104,42 @@ def revoke_share(
     # Scoped through the report, not through `created_by`: an admin revoking a
     # link on somebody's report is exactly the case this needs to allow.
     authorize_owner(user, record.report.user_id)
-    return _link(share.revoke_share(db, record))
+    revoked = share.revoke_share(db, record)
+
+    audit.record(
+        db,
+        action=audit.SHARE_REVOKE,
+        request=request,
+        actor=user,
+        target_type="share",
+        target_id=revoked.share_id,
+        # How much was read before somebody pulled the link is the first thing
+        # anyone wants after revoking one because it leaked.
+        detail={
+            "report_id": str(revoked.report_id),
+            "view_count": revoked.view_count,
+            "last_viewed_at": revoked.last_viewed_at,
+        },
+    )
+    return _link(revoked)
 
 
 # --- Public routes --------------------------------------------------------
 
 
 @router.get("/share/{token}", response_model=SharedReport, tags=["public"])
-def read_shared_report(token: str, db: Session = Depends(get_db)) -> SharedReport:
+def read_shared_report(
+    token: str, request: Request, db: Session = Depends(get_db)
+) -> SharedReport:
     """Read one report by link. No authentication, and no way to reach a second."""
+    _throttle(db, request)
     return _shared_report(db, _resolve(db, token))
 
 
 @router.get("/share/{token}/export", response_class=Response, tags=["public"])
 def export_shared_report(
     token: str,
+    request: Request,
     format: export.ExportFormat = "pdf",
     db: Session = Depends(get_db),
 ) -> Response:
@@ -107,11 +149,36 @@ def export_shared_report(
     what the page carries — no sealed hash, no internal identifier — and says
     on its face that it is a shared copy.
     """
+    _throttle(db, request)
     shared = _shared_report(db, _resolve(db, token))
     return as_download(export.render(export.source_from_shared(shared), format))
 
 
 # --- Internals ------------------------------------------------------------
+
+
+def _throttle(db: Session, request: Request) -> None:
+    """Cap how fast one address can pull share links.
+
+    Not a brute-force control — a token is 32 bytes from `secrets`, and nobody
+    guesses one. This is a ceiling on what a *valid* link can be used for: the
+    public routes are the only unauthenticated read in the application, so
+    without it a leaked link is an uncapped export endpoint. Counted per
+    address across all tokens rather than per token, because the abuse is one
+    host pulling repeatedly, and keying on the token would let an attacker
+    holding two links have two budgets.
+
+    Attempts are counted before the token is resolved, so an address probing
+    for tokens it does not have spends the same budget as one using a real one.
+    """
+    ip = ratelimit.client_ip(request)
+    quota = ratelimit.share_ip_quota()
+    ratelimit.enforce(
+        db, scope=ratelimit.IP, identifier=ip, action=ratelimit.SHARE, quota=quota
+    )
+    ratelimit.record(
+        db, scope=ratelimit.IP, identifier=ip, action=ratelimit.SHARE, successful=True
+    )
 
 
 def _resolve(db: Session, token: str) -> models.ReportShare:

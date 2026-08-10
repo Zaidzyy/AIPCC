@@ -173,6 +173,49 @@ export function integrityToken(state) {
   return INTEGRITY_TOKENS[String(state ?? "").toUpperCase()] ?? INTEGRITY_TOKENS.UNKNOWN;
 }
 
+// --- Audit ----------------------------------------------------------------
+
+/**
+ * The outcome of an audited action.
+ *
+ * Coloured, because an outcome is a state and states are the one thing chroma
+ * is allowed to encode here. `blocked` is amber rather than red on purpose: a
+ * refused login is the rate limiter working, which is not the same event as a
+ * credential being guessed wrong, and painting them alike would hide a spray
+ * inside a wall of red.
+ *
+ * Every class name is written out in full — see the note on `SEVERITY_TOKENS`.
+ * A name assembled at runtime silently gets no rule, which cost this project a
+ * whole set of severity borders once already.
+ */
+const OUTCOME_TOKENS = {
+  success: { label: "Success", text: "text-ok", dot: "bg-ok" },
+  failure: { label: "Failure", text: "text-critical", dot: "bg-critical" },
+  blocked: { label: "Blocked", text: "text-medium", dot: "bg-medium" },
+};
+
+export function outcomeToken(outcome) {
+  const key = String(outcome ?? "").toLowerCase();
+  return OUTCOME_TOKENS[key] ?? { label: outcome || "Unknown", text: "text-ink-dim", dot: "bg-ink-faint" };
+}
+
+/**
+ * `auth.login.failure` reads as "Login failure" in a table and as its raw id
+ * in a filter. Both are wanted: the label is scannable, the id is what you
+ * paste into a query or find in the backend source.
+ */
+export function actionLabel(action) {
+  const parts = String(action ?? "").split(".");
+  const verb = parts.slice(1).join(" ").replace(/_/g, " ");
+  if (!verb) return action || "—";
+  return (verb.charAt(0).toUpperCase() + verb.slice(1)).replace(/\bsuccess\b|\bfailure\b/, "").trim();
+}
+
+/** The `subject` half of a dotted action — `auth`, `user`, `report`, `share`. */
+export function actionSubject(action) {
+  return String(action ?? "").split(".")[0] || "—";
+}
+
 // --- Classification -------------------------------------------------------
 
 /** Mirrors the closed vocabulary in `app/schemas/report.py`, least to most restricted. */

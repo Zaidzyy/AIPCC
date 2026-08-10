@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   alertsApi,
+  auditApi,
   chatApi,
   dashboardApi,
   documentsApi,
@@ -34,6 +35,11 @@ export const keys = {
   dashboardAnomalies: (days) => ["dashboard", "anomalies-over-time", days],
   alerts: ["alerts"],
   alertList: (status) => ["alerts", status ?? "all"],
+  // The filter set is part of the key: /audit?action=auth.login.failure and
+  // an unfiltered page are different responses and must not share an entry.
+  audit: ["audit"],
+  auditList: (params) => ["audit", params],
+  auditFilters: ["audit", "filters"],
   shares: (reportId) => ["reports", reportId, "shares"],
   // The public read is keyed on the token and lives outside every other key
   // space: nothing an authenticated page invalidates should touch it.
@@ -67,6 +73,30 @@ export function useSetAlertStatus() {
 
 export function useDeleteAlert() {
   return useAlertMutation(alertsApi.remove);
+}
+
+// --- Audit (admin) --------------------------------------------------------
+
+export function useAuditLog(params) {
+  return useQuery({
+    queryKey: keys.auditList(params),
+    queryFn: () => auditApi.list(params),
+    // The log only ever grows, so the page the admin is reading cannot go
+    // stale in a way that misleads them — but a *new* entry arriving matters,
+    // which is why this is short rather than absent.
+    staleTime: 15 * 1000,
+    // Keeps the previous page on screen while the next one loads, so paging
+    // through does not flash an empty table between every step.
+    placeholderData: (previous) => previous,
+  });
+}
+
+export function useAuditFilters() {
+  return useQuery({
+    queryKey: keys.auditFilters,
+    queryFn: auditApi.filters,
+    staleTime: 5 * 60 * 1000,
+  });
 }
 
 // --- Dashboard ------------------------------------------------------------

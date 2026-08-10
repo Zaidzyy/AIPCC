@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from app.schemas.auth import (
     UserRoleUpdate,
     UserStatusUpdate,
 )
+from app.services import audit
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -34,7 +35,8 @@ def list_users(
 @router.post("", response_model=UserPublic, status_code=201)
 def create_user(
     payload: AdminUserCreate,
-    _: models.Users = Depends(require_human_admin),
+    request: Request,
+    admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
     existing = db.scalar(
@@ -59,6 +61,18 @@ def create_user(
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    audit.record(
+        db,
+        action=audit.USER_CREATE,
+        request=request,
+        actor=admin,
+        target_type="user",
+        target_id=user.user_id,
+        # The role is the part worth reading back later: this is the only
+        # endpoint in the application that can mint an administrator.
+        detail={"email": user.email, "role": user.role},
+    )
     return UserPublic.model_validate(user)
 
 
@@ -78,6 +92,7 @@ def get_user(
 def update_role(
     user_id: uuid.UUID,
     payload: UserRoleUpdate,
+    request: Request,
     admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
@@ -87,9 +102,23 @@ def update_role(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "you cannot remove your own admin role"
         )
+    previous = user.role
     user.role = payload.role
     db.commit()
     db.refresh(user)
+
+    # `from` as well as `to`. A privilege escalation is only visible as a
+    # transition; a row saying "role: admin" cannot be told apart from an
+    # account that was always one.
+    audit.record(
+        db,
+        action=audit.USER_ROLE_CHANGE,
+        request=request,
+        actor=admin,
+        target_type="user",
+        target_id=user.user_id,
+        detail={"email": user.email, "from": previous, "to": user.role},
+    )
     return UserPublic.model_validate(user)
 
 
@@ -97,6 +126,7 @@ def update_role(
 def update_status(
     user_id: uuid.UUID,
     payload: UserStatusUpdate,
+    request: Request,
     admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> UserPublic:
@@ -105,15 +135,27 @@ def update_status(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "you cannot deactivate your own account"
         )
+    previous = user.status
     user.status = payload.status
     db.commit()
     db.refresh(user)
+
+    audit.record(
+        db,
+        action=audit.USER_STATUS_CHANGE,
+        request=request,
+        actor=admin,
+        target_type="user",
+        target_id=user.user_id,
+        detail={"email": user.email, "from": previous, "to": user.status},
+    )
     return UserPublic.model_validate(user)
 
 
 @router.delete("/{user_id}", status_code=204)
 def delete_user(
     user_id: uuid.UUID,
+    request: Request,
     admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> None:
@@ -122,8 +164,22 @@ def delete_user(
         raise HTTPException(
             status.HTTP_400_BAD_REQUEST, "you cannot delete your own account"
         )
+    # Read before the delete: afterwards the row is gone and the log would be
+    # left pointing at an id with no way to say whose it was. This is why
+    # `audit_log.actor_id` carries no foreign key — see `db/models.AuditLog`.
+    deleted = {"email": user.email, "role": user.role}
     db.delete(user)
     db.commit()
+
+    audit.record(
+        db,
+        action=audit.USER_DELETE,
+        request=request,
+        actor=admin,
+        target_type="user",
+        target_id=user_id,
+        detail=deleted,
+    )
 
 
 def _get_or_404(db: Session, user_id: uuid.UUID) -> models.Users:

@@ -35,6 +35,12 @@ export function AuthProvider({ children }) {
   });
 
   const logout = useCallback(() => {
+    // Fired, not awaited. The audit entry is worth having, but a slow or dead
+    // API must never be able to keep somebody signed in — and the token being
+    // cleared is the part that actually ends the session locally. A rejection
+    // is swallowed for the same reason: there is nothing useful to tell a user
+    // who has already left.
+    authApi.logout().catch(() => {});
     clearToken();
     setTokenState(null);
     // Drop every cached response — the next user must not see the last one's

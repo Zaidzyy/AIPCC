@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routers import (
     alerts,
     api_keys,
+    audit,
     auth,
     chat,
     dashboard,
@@ -22,6 +23,7 @@ from app.api.routers import (
     users,
 )
 from app.core.config import settings
+from app.core.middleware import SecurityHeadersMiddleware
 
 
 def create_app() -> FastAPI:
@@ -46,6 +48,12 @@ def create_app() -> FastAPI:
         expose_headers=["Content-Disposition"],
     )
 
+    # Added *after* CORS on purpose. `add_middleware` prepends, so the last one
+    # added is the outermost — which is what puts the security headers on
+    # responses no route ever sees: CORS preflights, which CORSMiddleware
+    # answers by itself, and anything an exception handler produces.
+    app.add_middleware(SecurityHeadersMiddleware)
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(users.router)
@@ -56,6 +64,7 @@ def create_app() -> FastAPI:
     app.include_router(dashboard.router)
     app.include_router(alerts.router)
     app.include_router(api_keys.router)
+    app.include_router(audit.router)
 
     return app
 

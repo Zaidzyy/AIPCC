@@ -11,7 +11,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -20,13 +20,15 @@ from app.core import api_key as api_key_utils
 from app.db import models
 from app.db.session import get_db
 from app.schemas.api_key import ApiKey, ApiKeyCreate, ApiKeyCreated
+from app.services import audit
 
 router = APIRouter(prefix="/api-keys", tags=["api-keys"])
 
 
 @router.post("", response_model=ApiKeyCreated, status_code=201)
 def create_api_key(
-    request: ApiKeyCreate,
+    payload: ApiKeyCreate,
+    request: Request,
     admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> ApiKeyCreated:
@@ -37,13 +39,13 @@ def create_api_key(
     """
     generated = api_key_utils.generate_key()
     expires_at = (
-        datetime.now(timezone.utc) + timedelta(days=request.expires_in_days)
-        if request.expires_in_days
+        datetime.now(timezone.utc) + timedelta(days=payload.expires_in_days)
+        if payload.expires_in_days
         else None
     )
 
     record = models.ApiKey(
-        name=request.name,
+        name=payload.name,
         prefix=generated.prefix,
         key_hash=generated.key_hash,
         user_id=admin.user_id,
@@ -52,6 +54,19 @@ def create_api_key(
     db.add(record)
     db.commit()
     db.refresh(record)
+
+    audit.record(
+        db,
+        action=audit.API_KEY_CREATE,
+        request=request,
+        actor=admin,
+        target_type="api_key",
+        target_id=record.key_id,
+        # The clear prefix, never the secret — it is the uniquely indexed
+        # lookup component and is exactly what identifies the key later, both
+        # in this log and in the list view.
+        detail={"name": record.name, "prefix": record.prefix, "expires_at": expires_at},
+    )
 
     return ApiKeyCreated(
         **ApiKey.model_validate(record).model_dump(), secret=generated.secret
@@ -72,7 +87,8 @@ def list_api_keys(
 @router.delete("/{key_id}", status_code=204)
 def revoke_api_key(
     key_id: uuid.UUID,
-    _: models.Users = Depends(require_human_admin),
+    request: Request,
+    admin: models.Users = Depends(require_human_admin),
     db: Session = Depends(get_db),
 ) -> None:
     """Revoke a key.
@@ -86,3 +102,20 @@ def revoke_api_key(
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"api key {key_id} not found")
     record.revoked = True
     db.commit()
+
+    audit.record(
+        db,
+        action=audit.API_KEY_REVOKE,
+        request=request,
+        actor=admin,
+        target_type="api_key",
+        target_id=record.key_id,
+        # `last_used_at` is the question everyone asks straight after revoking
+        # a key in anger, so it goes in the record of the revocation itself
+        # rather than only in a row somebody has to think to go and read.
+        detail={
+            "name": record.name,
+            "prefix": record.prefix,
+            "last_used_at": record.last_used_at,
+        },
+    )

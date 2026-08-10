@@ -77,6 +77,40 @@ class Settings(BaseSettings):
     # --- Uploads -----------------------------------------------------------
     upload_dir: Path = BACKEND_DIR / "uploads"
 
+    # --- Rate limiting (Phase 8) -------------------------------------------
+    # State lives in Postgres, in `auth_attempts`. See CLAUDE.md > Phase 8 for
+    # why not Redis and why not process memory.
+    #
+    # Two controls, because there are two attacks. The per-IP lockout is what
+    # actually stops a flood. The per-account control is a *delay and never a
+    # lock*, so nobody can take a real user offline by failing their login on
+    # purpose — see CLAUDE.md.
+    rate_limit_enabled: bool = True
+    login_ip_max_failures: int = 5
+    login_ip_window_minutes: int = 15
+    # Delays start on the failure *after* this many: 3 means failure #4 sleeps.
+    login_delay_after_failures: int = 3
+    # The cap matters. Each delayed login holds one threadpool thread, so an
+    # unbounded backoff would be a denial of service against ourselves.
+    login_delay_max_seconds: float = 8.0
+    register_ip_max_per_hour: int = 5
+    # Change-password is behind a valid session for that exact account, so only
+    # the account holder can spend this budget. A hard lock is safe here.
+    password_change_max_failures: int = 5
+    password_change_window_minutes: int = 15
+    # The public share route has no account to key on and is a read, so this is
+    # a flood ceiling rather than a brute-force control. Tokens are 32 bytes;
+    # guessing one is not the threat, scraping with a valid one is.
+    share_ip_max_per_minute: int = 60
+    # `python -m app.db.prune` drops attempt rows older than this.
+    auth_attempt_retention_days: int = 30
+    # `X-Forwarded-For` is caller-supplied and is ignored unless something in
+    # front of this app is guaranteed to overwrite it. Trusting it by default
+    # would turn a per-IP lockout into a per-attacker-chosen-string lockout —
+    # no lockout at all — and would let anyone lock out someone else's address
+    # by claiming it.
+    trust_proxy_header: bool = False
+
     # --- Sharing -----------------------------------------------------------
     # Where a share link points. This is the *frontend* origin, not the API's:
     # a share URL is opened by a person in a browser, and the page they land on

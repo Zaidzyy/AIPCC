@@ -74,4 +74,13 @@ export default [
       globals: { ...globals.browser, ...globals.node },
     },
   },
+  {
+    // The Vite config runs in Node, not the browser. It reads
+    // `VITE_API_BASE_URL` to build the SPA's `connect-src`, so it needs
+    // `process` — which `globals.browser` correctly does not provide.
+    files: ["*.config.js"],
+    languageOptions: {
+      globals: globals.node,
+    },
+  },
 ];
