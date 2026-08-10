@@ -8,8 +8,9 @@ Run deliberately — never on startup:
     python -m app.db.seed --service-token   # also mint an API key for n8n
     python -m app.db.seed --reset      # delete seeded rows first, then re-seed
 
-`--ingest` is opt-in because it loads the MiniLM embedding model, which is a
-slow first-run download.
+`--ingest` is opt-in because it loads the MiniLM embedding model. It skips the
+work when the sample document already has chunks in Chroma, so the compose
+stack can run it on every boot without accumulating duplicate copies.
 
 `--demo` is opt-in because it writes a lot of rows. It calls no LLM — every
 value comes from the fixed-seed fixtures in `app.db.demo_data` — and it is what
@@ -267,13 +268,25 @@ def main(argv: list[str] | None = None) -> int:
         if args.ingest and document is not None:
             # Imported here so the default path never loads the embedding model.
             from app.services.rag.ingest import ingest
+            from app.services.rag.vectorstore import count_chunks
 
-            chunks = ingest(
-                document.document_path,
-                document.document_extension,
-                str(document.document_id),
-            )
-            print(f"ingested {chunks} chunks into Chroma at {settings.chroma_dir}")
+            # Asked of Chroma, not inferred from "did we just create the
+            # document row". The database and the vector store live in separate
+            # volumes and go out of step: a wiped chroma volume with the DB
+            # intact must still re-embed. Re-embedding blindly is the worse
+            # failure — `docker compose up` runs this on every boot, and each
+            # one would add another full copy of the same 195 chunks, quietly
+            # degrading retrieval for as long as nobody noticed.
+            indexed = count_chunks(str(document.document_id))
+            if indexed:
+                print(f"sample document already indexed: {indexed} chunks")
+            else:
+                chunks = ingest(
+                    document.document_path,
+                    document.document_extension,
+                    str(document.document_id),
+                )
+                print(f"ingested {chunks} chunks into Chroma at {settings.chroma_dir}")
 
     print("seed complete")
     return 0
