@@ -11,20 +11,18 @@ Ingest a security log. Get a structured, cited, validated incident report — an
 ![The AIPCC dashboard: KPI strip, reports-generated volume, findings by severity, top attack types](docs/images/dashboard.jpg)
 *A fresh `docker compose up` with the demo seed: 47 reports, 55 critical findings, and — the tile that matters — **10 needs attention**, reports that came back partial or failed. Every figure is a SQL `GROUP BY` over real rows, and a failed aggregate renders as `—` rather than `0`: "I could not read this" and "there are none" must never look alike on a security dashboard.*
 
-
 AIPCC takes a security log (CSV / JSON / TXT / LOG), embeds it into a vector
 store, and generates a five-section incident report — **attack types** (MITRE
 ATT&CK-mapped), **risk assessment**, **vulnerabilities** (CVE/CWE), **anomalies**
-and an **event timeline**. The five sections are written concurrently, validated
+and an **event timeline**. The sections are written concurrently, validated
 against one canonical Pydantic schema, and repaired once if validation fails.
-Every finding cites the log rows it came from, and citations the model invented
-are detected and marked rather than quietly dropped.
+Every finding cites the log rows it came from; citations the model invented are
+flagged, not quietly dropped.
 
-Around that sit the things a report generator needs before anyone would use it:
-a MITRE ATT&CK matrix that shows what was detected *and* what the model got
-wrong, an attack graph built from stored rows rather than a second LLM pass,
-PDF/DOCX export, revocable share links, an append-only audit log, per-call token
-and cost accounting, and n8n workflows for scheduling and third-party
+Around that sits what a report generator needs before anyone would use it: an
+ATT&CK matrix showing what was detected *and* what the model got wrong, an
+attack graph built from stored rows, PDF/DOCX export, revocable share links, an
+append-only audit log, cost accounting, and n8n workflows for scheduling and
 enrichment.
 
 ---
