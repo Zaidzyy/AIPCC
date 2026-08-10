@@ -6,6 +6,7 @@ import {
   dashboardApi,
   documentsApi,
   reportsApi,
+  sharesApi,
   usersApi,
 } from "@/lib/api";
 
@@ -33,6 +34,10 @@ export const keys = {
   dashboardAnomalies: (days) => ["dashboard", "anomalies-over-time", days],
   alerts: ["alerts"],
   alertList: (status) => ["alerts", status ?? "all"],
+  shares: (reportId) => ["reports", reportId, "shares"],
+  // The public read is keyed on the token and lives outside every other key
+  // space: nothing an authenticated page invalidates should touch it.
+  sharedReport: (token) => ["share", token],
 };
 
 // --- Alerts ---------------------------------------------------------------
@@ -155,6 +160,70 @@ export function useDeleteReport() {
       queryClient.invalidateQueries({ queryKey: keys.dashboard });
     },
   });
+}
+
+export function useSetClassification() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ reportId, classification }) =>
+      reportsApi.setClassification(reportId, classification),
+    onSuccess: (summary) => {
+      queryClient.invalidateQueries({ queryKey: keys.report(summary.report_id) });
+      queryClient.invalidateQueries({ queryKey: keys.reports });
+      // Raising a report to Confidential stops its links resolving, so what the
+      // share list says about them is now out of date.
+      queryClient.invalidateQueries({ queryKey: keys.shares(summary.report_id) });
+    },
+  });
+}
+
+/**
+ * Export is a mutation, not a query: it produces a file the user takes away,
+ * it has no cached representation, and firing it twice must download twice.
+ */
+export function useExportReport() {
+  return useMutation({ mutationFn: reportsApi.exportReport });
+}
+
+// --- Sharing --------------------------------------------------------------
+
+export function useReportShares(reportId, { enabled = true } = {}) {
+  return useQuery({
+    queryKey: keys.shares(reportId),
+    queryFn: () => sharesApi.list(reportId),
+    enabled: Boolean(reportId) && enabled,
+  });
+}
+
+export function useCreateShare(reportId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (input) => sharesApi.create({ reportId, ...input }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.shares(reportId) }),
+  });
+}
+
+export function useRevokeShare(reportId) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: sharesApi.revoke,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: keys.shares(reportId) }),
+  });
+}
+
+export function useSharedReport(token) {
+  return useQuery({
+    queryKey: keys.sharedReport(token),
+    queryFn: () => sharesApi.getShared(token),
+    enabled: Boolean(token),
+    // A link that is revoked, expired or reclassified stays that way. Retrying
+    // a 403/404/410 only delays telling the recipient what happened.
+    retry: false,
+  });
+}
+
+export function useExportSharedReport() {
+  return useMutation({ mutationFn: sharesApi.exportShared });
 }
 
 // --- Users (admin) --------------------------------------------------------

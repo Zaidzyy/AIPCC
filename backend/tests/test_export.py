@@ -251,6 +251,20 @@ class TestExportEndpoint:
         response = api.get(f"/reports/{analyst_report}/export", headers=admin_auth)
         assert response.status_code == 200
 
+    def test_the_filename_is_readable_from_a_browser(self, api, analyst_auth, analyst_report):
+        """`Content-Disposition` is not CORS-safelisted.
+
+        Found live: the download worked, the header was sent, and the browser
+        hid it from JavaScript — so every export silently saved as the client's
+        fallback name. Nothing failed, which is why it needs a test.
+        """
+        response = api.get(
+            f"/reports/{analyst_report}/export",
+            headers={**analyst_auth, "Origin": "http://localhost:5173"},
+        )
+        exposed = response.headers.get("access-control-expose-headers", "")
+        assert "content-disposition" in exposed.lower()
+
 
 class TestSourceAdapters:
     def test_owner_export_carries_the_seal_and_the_reference(self):

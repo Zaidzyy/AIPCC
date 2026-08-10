@@ -12,4 +12,5 @@ export * as chatApi from "./chat";
 export * as dashboardApi from "./dashboard";
 export * as documentsApi from "./documents";
 export * as reportsApi from "./reports";
+export * as sharesApi from "./shares";
 export * as usersApi from "./users";

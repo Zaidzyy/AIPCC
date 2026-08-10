@@ -173,6 +173,51 @@ export function integrityToken(state) {
   return INTEGRITY_TOKENS[String(state ?? "").toUpperCase()] ?? INTEGRITY_TOKENS.UNKNOWN;
 }
 
+// --- Classification -------------------------------------------------------
+
+/** Mirrors the closed vocabulary in `app/schemas/report.py`, least to most restricted. */
+export const CLASSIFICATIONS = ["Public", "Internal", "Confidential"];
+
+/**
+ * Classification is encoded by an **icon**, not a hue.
+ *
+ * It is a state, so under this app's colour rule it would be entitled to one —
+ * but red already means critical severity here, and a second meaning for the
+ * same colour dilutes both. On paper the caveat gets red because it sits alone
+ * in the page furniture with nothing to be confused with; on screen it sits
+ * two inches from a severity badge.
+ *
+ * `shareable` is the UI's copy of the server rule, used only to decide what the
+ * share dialog says before you press the button. The server decides.
+ */
+const CLASSIFICATION_TOKENS = {
+  Public: {
+    key: "Public",
+    label: "Public",
+    icon: "globe",
+    shareable: true,
+    description: "May be shared outside the organisation.",
+  },
+  Internal: {
+    key: "Internal",
+    label: "Internal",
+    icon: "building",
+    shareable: true,
+    description: "May be shared by link with people outside the app.",
+  },
+  Confidential: {
+    key: "Confidential",
+    label: "Confidential",
+    icon: "lock",
+    shareable: false,
+    description: "Sharing by link requires a written justification, which is recorded.",
+  },
+};
+
+export function classificationToken(value) {
+  return CLASSIFICATION_TOKENS[value] ?? { key: value, label: value || "—", icon: "building", shareable: true, description: "" };
+}
+
 // --- Primitives -----------------------------------------------------------
 
 export function formatBytes(bytes) {

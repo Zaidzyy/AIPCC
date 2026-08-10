@@ -38,6 +38,12 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # `Content-Disposition` is not a CORS-safelisted response header, so a
+        # browser hides it from JavaScript unless it is named here. Without
+        # this the export downloads correctly and silently lands as the client
+        # fallback name — the header is sent, the fetch succeeds, and only the
+        # filename is quietly wrong.
+        expose_headers=["Content-Disposition"],
     )
 
     app.include_router(health.router)

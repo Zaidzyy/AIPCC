@@ -2,20 +2,13 @@ import { AlertTriangle, ArrowLeft, Trash2 } from "lucide-react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { SeveritySpine } from "@/components/common/SeveritySpine";
+import { ClassificationSelect } from "@/components/report/ClassificationSelect";
+import { ExportMenu } from "@/components/report/ExportMenu";
+import { ReportBody } from "@/components/report/ReportBody";
+import { ShareDialog } from "@/components/report/ShareDialog";
 import {
-  Anomalies,
-  AttackTypes,
-  RiskAssessment,
-  Timeline,
-  Vulnerabilities,
-} from "@/components/report/sections";
-import { ThreatIntel } from "@/components/report/ThreatIntel";
-import {
-  Badge,
   Button,
   Card,
-  CardHeader,
-  CardTitle,
   ErrorState,
   IntegrityBadge,
   LoadingState,
@@ -25,22 +18,9 @@ import {
   Tooltip,
   useToast,
 } from "@/components/ui";
-import { useDeleteReport, useReport } from "@/hooks/queries";
+import { useDeleteReport, useExportReport, useReport } from "@/hooks/queries";
 import { errorMessage } from "@/lib/apiClient";
 import { formatDateTime, integrityToken, severityCounts, shortId } from "@/lib/format";
-
-/**
- * Section order matches the order the backend generates them in, which is also
- * the order an analyst reads them: what happened, how bad, what is weak, what
- * looks odd, and when.
- */
-const SECTIONS = [
-  { key: "attack_types", label: "Attack types", Component: AttackTypes },
-  { key: "general_risk_assessment", label: "Risk assessment", Component: RiskAssessment },
-  { key: "vulnerabilities", label: "Vulnerabilities", Component: Vulnerabilities },
-  { key: "anomalies", label: "Anomalies", Component: Anomalies },
-  { key: "timeline", label: "Timeline", Component: Timeline },
-];
 
 export function ReportDetail() {
   const { reportId } = useParams();
@@ -49,6 +29,7 @@ export function ReportDetail() {
 
   const query = useReport(reportId);
   const remove = useDeleteReport();
+  const exportReport = useExportReport();
 
   if (query.isPending) return <DetailSkeleton />;
 
@@ -97,7 +78,10 @@ export function ReportDetail() {
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2">
               <StatusBadge status={report.status} />
               <IntegrityBadge state={report.integrity_state} />
-              <Badge variant="outline">{report.classification}</Badge>
+              <ClassificationSelect
+                reportId={report.report_id}
+                value={report.classification}
+              />
               <span className="text-[0.8125rem] text-ink-faint">
                 {formatDateTime(report.generated_at)}
               </span>
@@ -107,15 +91,21 @@ export function ReportDetail() {
             </div>
           </div>
 
-          <Button
-            variant="ghost"
-            size="sm"
-            loading={remove.isPending}
-            onClick={handleDelete}
-          >
-            <Trash2 />
-            Delete
-          </Button>
+          <div className="flex shrink-0 items-center gap-1">
+            <ExportMenu
+              download={(format) => exportReport.mutateAsync({ reportId, format })}
+            />
+            <ShareDialog report={report} />
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={remove.isPending}
+              onClick={handleDelete}
+            >
+              <Trash2 />
+              Delete
+            </Button>
+          </div>
         </div>
 
         <div className="mt-6 grid gap-4 lg:grid-cols-[1.6fr_1fr]">
@@ -129,29 +119,7 @@ export function ReportDetail() {
 
       {report.errors?.length > 0 && <SectionErrors errors={report.errors} />}
 
-      <div className="space-y-6">
-        {SECTIONS.map(({ key, label, Component }) => (
-          <Card key={key} id={key} className="overflow-hidden scroll-mt-20">
-            <CardHeader>
-              <CardTitle>{label}</CardTitle>
-              <span className="font-mono text-xs tabular-nums text-ink-faint">
-                {report.sections[key]?.length ?? 0}
-              </span>
-            </CardHeader>
-            <Component items={report.sections[key]} />
-          </Card>
-        ))}
-
-        <Card id="threat_intel" className="overflow-hidden scroll-mt-20">
-          <CardHeader>
-            <CardTitle>Threat intelligence</CardTitle>
-            <span className="font-mono text-xs tabular-nums text-ink-faint">
-              {report.threat_intel?.length ?? 0}
-            </span>
-          </CardHeader>
-          <ThreatIntel items={report.threat_intel} />
-        </Card>
-      </div>
+      <ReportBody report={report} />
     </>
   );
 }

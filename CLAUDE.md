@@ -47,21 +47,25 @@ backend/
       config.py             # pydantic-settings — ALL env access happens here
       security.py           # bcrypt hashing, JWT create/verify, auth dependencies
       api_key.py            # long-lived machine credentials (SHA-256, not bcrypt)
+      share_token.py        # read-one-report capability tokens (neither JWT nor API key)
     db/
       session.py            # engine + session factory (NEVER drop/create on import)
       models.py             # SQLAlchemy models
       seed.py               # explicit seed script, run manually
       demo_data.py          # deterministic --demo fixtures (fixed seed, no LLM)
     schemas/                # Pydantic: API request/response + LLM output schemas
-    api/routers/            # auth, users, documents, reports, chat, dashboard,
-                            #   alerts, api_keys
+    api/routers/            # auth, users, documents, reports, shares, chat,
+                            #   dashboard, alerts, api_keys
     services/
       rag/                  # ingest, chunk, embed  (ported from prototype)
       llm/                  # LLMProvider abstraction + implementations
+      export/               # layout.py (one document model) + pdf_writer + docx_writer
       report.py             # parallel section generation, validation, retry
       analytics.py          # dashboard aggregation — GROUP BY in SQL, never ORM loops
+      severity.py           # the free-text severity ladder, defined once
       chatbot.py            # chat over ingested docs
       integrity.py          # SHA-256 sealing + safe upload-path resolution
+      share.py              # share-link rules: creation, expiry, revocation, classification
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -75,7 +79,8 @@ frontend/
     components/ui/          # design system primitives (Radix behaviour, own styling)
     components/layout/      # AppShell, Sidebar, Topbar
     components/common/      # PageHeader, SeveritySpine, AmbientVideo, IntroSequence
-    components/report/      # the five report section renderers + ThreatIntel
+    components/report/      # section renderers, ReportBody (shared with the public
+                            #   share view), ExportMenu, ShareDialog, classification
     context/AuthContext.jsx # token + current user; the only source of "who am I"
     hooks/queries.js        # every TanStack Query hook and its query keys
     routes/                 # ProtectedRoute, AdminRoute
@@ -169,7 +174,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–5 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
+**Phases 0–6 complete.** See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
 In place: backend package + app factory, centralized config, all 10 SQLAlchemy models on UUID keys,
@@ -184,9 +189,13 @@ SQL `GROUP BY`, four Recharts views bound to them, and a `--demo` seed that popu
 **and the full n8n integration — revocable API keys for machine callers, SHA-256 file-integrity
 sealing with the four endpoints the FIM engine needs, a security-alerts table with its own view,
 threat-intel enrichment persisted alongside reports, and both workflow JSONs corrected to call
-the real endpoints with auth attached.** 231 backend tests pass; `npm run lint` is clean.
+the real endpoints with auth attached,
+**and report export to PDF and DOCX from one format-independent layout, a closed
+`Public | Internal | Confidential` classification enforced at the API, and revocable, expiring,
+read-only share links with a public route outside the authenticated shell.** 318 backend tests
+pass; `npm run lint` is clean.
 
-Not yet built: export (Phase 6), polish (7). The n8n workflow JSONs are corrected and their
+Not yet built: polish (Phase 7). The n8n workflow JSONs are corrected and their
 endpoint contracts are covered by tests and verified against a running backend with a real service
 key, but the workflows themselves have not been executed inside n8n — that needs live Groq,
 AbuseIPDB and VirusTotal credentials. See `n8n/IMPORT.md` > Verification status.
@@ -503,5 +512,40 @@ absent from its final tree — `git show` recovers it as reference material.
 - **A report belongs to its document's owner, and a share belongs to its report** — Phase 5's rule,
   unchanged. Revocation is authorized through the report, not through `created_by`, so an admin can
   kill a link on somebody else's report.
+
+### Decisions taken in Phase 6 — frontend
+
+- **`/share/:token` is outside `ProtectedRoute` *and* outside `AppShell`.** Not a styling choice:
+  the shell exists to move between a user's reports and there is nothing here for a link holder to
+  move to. A shell with every nav item removed is still a shell with "Dashboard" one CSS rule away
+  from coming back.
+- **`components/report/ReportBody.jsx` is shared by the authenticated page and the public one.**
+  Two renderings of one report would be two places for a section to go missing, and the public one
+  is the copy nobody on the team ever looks at.
+- **Classification is an icon, not a hue.** It is a state and would be entitled to colour under this
+  app's rule — but red already means critical severity, and the classification pill sits two inches
+  from a severity badge. On paper it gets red, because there it sits alone in the page furniture.
+- **The three share refusals get three different pages.** 404 "not valid", 410 "expired", 403
+  "classification was raised". One "something went wrong" would leave the reader unable to tell
+  whether to ask for a new link or to stop asking.
+- **`active` is read from the server, never recomputed from `expires_at`.** Otherwise the dialog and
+  the link itself disagree for anyone whose machine clock is off.
+- **Export is a mutation, not a query.** It produces a file the user takes away, it has no cached
+  representation, and pressing it twice must download twice.
+- **The export toast is deliberately generic on failure.** The endpoint answers with a blob, so an
+  error arrives as JSON *inside* a Blob that `errorMessage` cannot read; parsing it back out for a
+  case that means "the report went away" is not worth the code.
+- **The share list is fetched only while the dialog is open**, so Report Detail does not pay for a
+  request most visits never need.
+
+### Bugs found and fixed in Phase 6
+
+- **`Content-Disposition` is not a CORS-safelisted response header.** Found live: the export
+  downloaded correctly, the header was sent, and the browser hid it from JavaScript — so every file
+  silently saved under the client's fallback name. Nothing failed, which is exactly why it now has
+  a test. Fixed with `expose_headers` on the CORS middleware.
+- **The demo seed emitted a fourth classification.** `--demo` wrote "Restricted", which the closed
+  vocabulary does not contain; the migration folds those rows up to Confidential and the seed now
+  draws from a weighted list of the three real levels.
 
 **Update this section at the end of every phase.**

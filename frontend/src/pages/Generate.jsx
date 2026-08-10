@@ -22,11 +22,10 @@ import {
 } from "@/components/ui";
 import { useDocuments, useGenerateReport, useUploadDocument } from "@/hooks/queries";
 import { errorDetail, errorMessage } from "@/lib/apiClient";
-import { formatBytes } from "@/lib/format";
+import { CLASSIFICATIONS, formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
 
 const ACCEPTED = [".csv", ".json", ".txt", ".log"];
-const CLASSIFICATIONS = ["Public", "Internal", "Confidential", "Restricted"];
 
 export function Generate() {
   const navigate = useNavigate();

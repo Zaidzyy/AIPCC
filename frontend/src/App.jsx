@@ -12,6 +12,7 @@ import { Profile } from "@/pages/Profile";
 import { ReportDetail } from "@/pages/ReportDetail";
 import { Reports } from "@/pages/Reports";
 import { Settings } from "@/pages/Settings";
+import { SharedReport } from "@/pages/SharedReport";
 import { Users } from "@/pages/Users";
 import { AdminRoute, ProtectedRoute } from "@/routes/ProtectedRoute";
 
@@ -28,6 +29,11 @@ export default function App() {
 
       <Routes>
         <Route path="/login" element={<Login />} />
+
+        {/* Outside the protected tree *and* outside the app shell. A share
+            link grants read of one report and nothing else, so the page it
+            lands on offers no navigation to anything else either. */}
+        <Route path="/share/:token" element={<SharedReport />} />
 
         <Route element={<ProtectedRoute />}>
           <Route element={<AppShell />}>
