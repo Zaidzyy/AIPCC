@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 
 import { SeveritySpine } from "@/components/common/SeveritySpine";
 import { ClassificationSelect } from "@/components/report/ClassificationSelect";
+import { GraphPanel } from "@/components/graph/GraphPanel";
 import { ExportMenu } from "@/components/report/ExportMenu";
 import { ReportBody } from "@/components/report/ReportBody";
 import { ShareDialog } from "@/components/report/ShareDialog";
@@ -120,6 +121,10 @@ export function ReportDetail() {
       {report.errors?.length > 0 && <SectionErrors errors={report.errors} />}
 
       <ReportBody report={report} />
+
+      {/* Below the findings, not above them: the graph is a way to read the
+          report, not a replacement for it. */}
+      <GraphPanel reportId={reportId} />
     </>
   );
 }

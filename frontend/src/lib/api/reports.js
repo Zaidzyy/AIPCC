@@ -25,6 +25,18 @@ export async function status(reportId) {
  * it, and keeping a wrapper nobody uses would only invite one.
  */
 
+/**
+ * The entity graph for one report.
+ *
+ * Built server-side from rows already stored — see
+ * `backend/app/services/attack_graph.py`. Nothing about it is computed in the
+ * browser, so two clients cannot disagree about who is connected to whom.
+ */
+export async function graph(reportId) {
+  const { data } = await apiClient.get(`/reports/${reportId}/graph`);
+  return data;
+}
+
 export async function remove(reportId) {
   await apiClient.delete(`/reports/${reportId}`);
 }

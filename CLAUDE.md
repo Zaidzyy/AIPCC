@@ -77,6 +77,7 @@ backend/
       llm/pricing.py        # tokens -> money; unpriced model costs null, never 0
       grounding.py          # citation validation: fabricated chunk ids are caught here
       attack_matrix.py      # the ATT&CK grid, detections on it, and the Navigator layer
+      attack_graph.py       # entities and edges from stored rows — never a second LLM pass
     eval/                   # the evaluation harness — see backend/EVAL.md
       data/                 # vendored ATT&CK + CWE + the Navigator layer schema, all
                             #   pinned, checksummed and attributed in SOURCES.md
@@ -96,6 +97,7 @@ frontend/
     index.css               # @theme tokens — the whole design system lives here
     App.jsx                 # routes only
     components/attack/      # the ATT&CK matrix grid and its technique dialog
+    components/graph/       # the attack graph; GraphCanvas is the lazy d3-force boundary
     components/charts/      # Recharts wrappers; ChartGrid is lazy-loaded — see below
     components/motion/      # CSS/SVG feature animations (no deps)
     components/ui/          # design system primitives (Radix behaviour, own styling)
@@ -221,7 +223,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–13 complete and merged — README and screenshots deliberately still not written.**
+**Phases 0–14 complete and merged — README and screenshots deliberately still not written.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -264,8 +266,12 @@ Navigator layer export validated against a JSON Schema derived from MITRE's publ
 **and streamed report generation — the five concurrent sections surfaced over SSE with per-section
 started / retrying / completed / failed events, a visible repair retry, a report row reserved
 before the first byte so a dropped connection reconnects through `GET /reports/{id}/status`
-instead of restarting, and the non-streaming `POST /generate_report` untouched for API clients.**
-568 backend tests and 62 frontend tests pass; `ruff check` and `npm run lint` are both clean with
+instead of restarting, and the non-streaming `POST /generate_report` untouched for API clients,
+**and the attack graph — entities and relationships derived from a report's own anomaly and
+timeline columns plus the citations Phase 10 recorded, with no second extraction pass, an identity
+rule that refuses to merge two principals on anything short of a log row saying they are the same,
+risk inherited from the findings that touch each node, and a force-directed SVG view behind its own
+lazy boundary.** 613 backend tests and 66 frontend tests pass; `ruff check` and `npm run lint` are both clean with
 no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
@@ -1308,5 +1314,107 @@ on a weaker model, two sections showing **"Retrying — repair prompt · First a
 validation: every item was empty; the all-null template was returned instead of findings from the
 log data"**, which is the exact event this phase exists to surface. A Gemini run with three
 sections rate-limited exercised the `failed` path with a real provider error and stored `partial`.
+
+### Decisions taken in Phase 14 — the attack graph
+
+**Where the graph comes from:**
+
+- **No second extraction pass, as instructed — and the reason is worth keeping.** The nodes come
+  from typed columns already stored (`anomalies.user_id/user_name/source_ip/destination_ip/
+  protocol`, `timeline_events.entity`) and the edges from those same rows plus Phase 10's
+  citations. Asking a model to extract entities would produce a second set of claims needing a
+  second validator, and the shape of this whole project is that model output is checked before it
+  is believed.
+- **Per report, never across an account.** A graph built from every report a user owns would join
+  entities that were never observed together, which is the one thing a graph must not do.
+
+**Identity — the DECISION NEEDED, and the bug that settled it:**
+
+- **Normalisation is case, whitespace and *surrounding* punctuation. Nothing else.** `JDOE`,
+  `jdoe ` and `"jdoe"` are one node; **`j.doe` and `jdoe` are not**, and neither are
+  `jdoe@corp.com` and `jdoe@partner.com`. Every additional rule that looks obvious — strip dots,
+  strip a domain, strip a `CORP\` prefix — is a way to merge two people who are not the same
+  person. A duplicate node is recoverable by a human reading the graph; a fabricated identity is
+  not, because it looks exactly like a real one.
+- **Two different identifiers merge only when a log row says they are one principal, *and* the
+  pairing is unambiguous across the report.** An anomaly carrying `user_id=4471` and
+  `user_name=rlee` is the schema asserting it. But the first version of this module unioned
+  transitively, and the first run against real generated data produced a node called `application`
+  carrying the aliases `20`, `21`, `37` and `system` — a generic display name had welded four
+  principals into one actor touching four hosts. Now a name seen against several ids merges
+  nothing, and there is a regression test named after it.
+- **A merge is displayed as a claim.** Aliases are always shown with the sentence explaining why
+  the merge was allowed, rather than silently applied.
+- **Node *type* is allowed to be a guess; node *identity* never is.** Deciding that `vpn-gw-01` is
+  a host puts the wrong icon on a correct node; deciding two names are one person puts a
+  relationship on the canvas that was never observed. That asymmetry is why `classify()` uses
+  shape heuristics freely and `normalize()` uses none.
+- **`entity` is a real fifth type, not a gap.** The timeline's `entity` column is free text, so
+  "Unauthorised user" and "System" arrive beside `10.14.2.37` and `powershell.exe`. Filing those
+  under `user` because three of four buckets are taken would be a guess rendered as a fact.
+- **Null markers are not entities.** `n/a`, `none`, `unknown`, `-` are the model writing "absent".
+  Found by looking at a rendered graph, where `n/a` had become a user node with its own edges.
+
+**Edges:**
+
+- **An anomaly row asserts exactly what it contains**: user→source, source→destination labelled
+  with the protocol, and user→destination *only* when there is no source to route through —
+  otherwise the graph would claim a direct relationship the row does not describe.
+- **Shared citations connect what no column relates.** Two findings that cite the same chunk were
+  read out of the same log rows; that is how a timeline entity, which has no address and no user
+  column, joins the graph at all. It is a weaker claim, so it is drawn dashed and pulls less hard
+  in the layout.
+- **A chunk naming more than six entities creates no edges.** A widely-shared retrieval hit is not
+  evidence of a specific relationship, and without the cap the graph becomes a clique.
+
+**Risk:**
+
+- **Anomalies and timeline events carry no severity column**, so a node's risk has to come from the
+  sections that do. Two routes, and which one was used is recorded and shown: `evidence` (the
+  finding cites a chunk this node's own finding also cites) and `mention` (the node's label appears
+  verbatim in the finding's text). "The model wrote this address into its description" and "both
+  were read out of the same log lines" are different strengths of claim, and an analyst deciding
+  whether to act on the graph needs to know which one they are looking at.
+- **A mention must match a whole identifier.** `10.0.0.7` is not named by a finding that says
+  `10.0.0.76`, and a plain substring test attaches a critical severity to the wrong host in a way
+  that looks entirely plausible on a canvas. The trailing lookahead rejects a dot only when a word
+  character follows it — the first version rejected any dot, which meant `10.0.0.2` never matched
+  "Traffic to 10.0.0.2." — the way most findings actually end. Both caught by tests.
+- **Aliases are scanned too**: a node keyed on `Ana Silva` should still match a description that
+  says `a.silva`.
+
+**Legibility:**
+
+- **Capped at 60 nodes, ranked by risk then degree, and the cap is stated on screen.** A graph that
+  silently drops nodes to stay readable lies about the report it claims to describe. If something
+  must go it is the isolated unrated node, never the critical one, and edges are filtered after
+  truncation so none dangle.
+- **`d3-force` and nothing else** — the simulation only, rendered as SVG by our own component. The
+  whole lazy chunk measures **17.5 kB raw / 6.9 kB gzipped**. `react-force-graph` pulls in
+  three.js; `cytoscape` and `vis-network` are 300–400 kB and arrive with a complete visual language
+  this app would then override. Same trade as `components/ui/` makes with Radix: take the
+  behaviour that is hard, write the appearance.
+- **Behind `React.lazy`, like `ChartGrid`.** A report page whose reader never opens the graph
+  should not download a physics engine. Nothing else may import `d3-force` directly.
+- **The layout runs to a fixed tick count and stops**, computed in a `useMemo` rather than an
+  effect. A graph that never settles cannot be read, and a permanent animation frame on a page
+  left open is a laptop fan.
+- **Honest empty state.** A report with no entity data says so, in the backend's own words, rather
+  than rendering an empty canvas — and a failed request renders differently again.
+
+**Bug found by looking rather than reading:** every risk-rated node drew as an invisible disc.
+Tailwind's `bg-*` sets `background-color`, which an SVG shape ignores completely, so the coloured
+nodes had no fill at all and looked exactly like nodes the layout had lost. Fixed with
+`fill="currentColor"` plus the severity's `text-*` class.
+
+**Demo data:** a handful of `--demo` findings now name the entities their anomalies carry
+(`10.14.5.72`, `vpn-gw-01`, `svc_backup`). Demo documents are never ingested, so demo reports have
+no citations at all — without a mention path the seeded graph would be entirely grey, and the risk
+weighting would look like a feature nobody built.
+
+**Verified by running:** a real seeded report renders 20 entities and 11 relationships — hosts,
+named users, isolated timeline hosts kept on canvas, protocol-labelled edges, amber and cyan nodes
+against graphite unrated ones — and clicking `10.14.9.11` dims the rest, shows `HOST / ADDRESS ·
+HIGH · 1 observation`, its two edges, and its two findings labelled `mention` and `source`.
 
 **Update this section at the end of every phase.**
