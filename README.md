@@ -51,17 +51,6 @@ PowerShell, the SMB sweep, the beacon and the log clearing in passing. That is
 defensible analysis — but scoring it as seven separate findings would be
 flattering, so both numbers are reported and the gap between them is the signal.
 
-**Scope — read this before the numbers.** These figures describe **one synthetic
-35-row CSV with a deliberately unambiguous story**, run once. They say nothing
-about noisy production data, about log formats other than CSV, or about attacks
-not represented in that file. **Retrieval quality is not evaluated at all** —
-golden retrieval is a fixed selection over five chunks, so a change that made the
-retriever pick worse chunks would not move any number above. The harness measures
-whether the model *fabricates* and whether it *cites*; it does not measure whether
-the system would find a real intrusion in a real SIEM export. All of this is
-stated at length in [`backend/EVAL.md`](backend/EVAL.md) under *What it does not
-prove*, and none of it is implied away here.
-
 The CI quality gate is a **separate** measurement on a deliberately weak recorded
 model, and it exists to catch validator regressions rather than to describe model
 quality. See [Evaluation](#evaluation) — it is worth reading before quoting any
