@@ -371,11 +371,20 @@ def _timestamp(value: datetime | None) -> str:
 _SLUG = re.compile(r"[^A-Za-z0-9]+")
 
 
-def _filename_stem(source: ExportSource) -> str:
-    """A filename that survives every filesystem and every mail client."""
-    slug = _SLUG.sub("-", source.report_name).strip("-").lower()[:60]
-    stamp = (source.generated_at or datetime.now()).strftime("%Y%m%d")
+def filename_stem(report_name: str, generated_at: datetime | None) -> str:
+    """A filename that survives every filesystem and every mail client.
+
+    Public because the Navigator layer export needs the same slug: two rules
+    for naming a downloaded file is how one of them ends up able to smuggle a
+    quote into a `Content-Disposition` header.
+    """
+    slug = _SLUG.sub("-", report_name).strip("-").lower()[:60]
+    stamp = (generated_at or datetime.now()).strftime("%Y%m%d")
     return f"{slug or 'security-report'}-{stamp}"
+
+
+def _filename_stem(source: ExportSource) -> str:
+    return filename_stem(source.report_name, source.generated_at)
 
 
 # --- Adapters -------------------------------------------------------------

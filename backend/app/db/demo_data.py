@@ -271,6 +271,57 @@ ATTACKS = [
         "likelihood": "Medium",
         "mitigation": "Extend resolver log retention and alert on high-entropy subdomains.",
     },
+    # --- Deliberately defective identifiers (Phase 12) --------------------
+    #
+    # The three below are wrong on purpose, each in one of the ways a real
+    # model gets a technique wrong. Without them a `--demo` database shows the
+    # ATT&CK matrix as fourteen clean detections, and the part of that page
+    # that matters — how a fabricated or retired identifier is *handled* — has
+    # no data to render and looks like a feature nobody built. The Phase 11
+    # fixture makes the same argument about recording the weak model: output
+    # with no defects in it cannot demonstrate a validator.
+    {
+        # Real, current id; the name is not what ATT&CK calls it. Placed on the
+        # matrix, marked unverified, labelled with the catalogue's name.
+        "attack_name": "Scheduled Task Persistence",
+        "attack_mitre_technique_id": "T1053",
+        "attack_mitre_technique_name": "Cron Job Persistence",
+        "attack_description": "A task registered on four hosts within a minute, all invoking the same script path.",
+        "risk_name": "Persistence through the task scheduler",
+        "risk_description": "Task creation is not centrally logged, so the additions were only visible on the endpoints themselves.",
+        "risk_level": "Medium",
+        "impact": "Attacker execution survives a reboot.",
+        "likelihood": "Medium",
+        "mitigation": "Forward scheduled-task creation events and alert on identical tasks across hosts.",
+    },
+    {
+        # Does not exist in ATT&CK. No column, no cell — reported beside the
+        # matrix as a fabricated identifier.
+        "attack_name": "Credential Relay",
+        "attack_mitre_technique_id": "T1888",
+        "attack_mitre_technique_name": "NTLM Relay Attack",
+        "attack_description": "Authentication attempts arriving at the file server bearing another host's machine account.",
+        "risk_name": "Relayed authentication inside the perimeter",
+        "risk_description": "SMB signing is not enforced on the file server tier.",
+        "risk_level": "High",
+        "impact": "Authenticated access without ever holding a credential.",
+        "likelihood": "Medium",
+        "mitigation": "Enforce SMB signing and LDAP channel binding.",
+    },
+    {
+        # Real once — ATT&CK revoked it. Not a hallucination, and not drawable
+        # on the published matrix either.
+        "attack_name": "Data Encrypted",
+        "attack_mitre_technique_id": "T1022",
+        "attack_mitre_technique_name": "Data Encrypted",
+        "attack_description": "Archive creation with a password immediately preceding an outbound transfer.",
+        "risk_name": "Staged data obscured before exfiltration",
+        "risk_description": "Content inspection cannot read an encrypted archive, so egress DLP sees only its size.",
+        "risk_level": "Medium",
+        "impact": "Exfiltrated data leaves without being classified.",
+        "likelihood": "Medium",
+        "mitigation": "Alert on encrypted archives created outside the backup window.",
+    },
 ]
 
 GENERAL_RISKS = [

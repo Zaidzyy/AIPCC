@@ -2,6 +2,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
   alertsApi,
+  attackApi,
   auditApi,
   chatApi,
   dashboardApi,
@@ -46,6 +47,11 @@ export const keys = {
   auditList: (params) => ["audit", params],
   auditFilters: ["audit", "filters"],
   evaluation: ["evaluation", "latest"],
+  // The grid is MITRE's published data and the detections are ours. Separate
+  // keys because they have nothing in common but a page: generating a report
+  // invalidates the second and can never affect the first.
+  attackMatrix: ["attack", "matrix"],
+  attackDetections: (reportId) => ["attack", "detections", reportId ?? "all"],
   shares: (reportId) => ["reports", reportId, "shares"],
   // The public read is keyed on the token and lives outside every other key
   // space: nothing an authenticated page invalidates should touch it.
@@ -115,6 +121,27 @@ export function useEvaluation() {
     // the result — not something a page refresh can move.
     staleTime: 10 * 60 * 1000,
     retry: false,
+  });
+}
+
+// --- ATT&CK matrix --------------------------------------------------------
+
+export function useAttackMatrix() {
+  return useQuery({
+    queryKey: keys.attackMatrix,
+    queryFn: attackApi.matrix,
+    // The published catalogue, pinned in the image. It cannot change while
+    // the tab is open, and re-fetching 89 KB of grid on every focus would be
+    // the most expensive no-op in the app.
+    staleTime: Infinity,
+    gcTime: Infinity,
+  });
+}
+
+export function useAttackDetections(reportId) {
+  return useQuery({
+    queryKey: keys.attackDetections(reportId),
+    queryFn: () => attackApi.detections(reportId),
   });
 }
 

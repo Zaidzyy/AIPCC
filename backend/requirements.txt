@@ -69,5 +69,9 @@ opentelemetry-exporter-otlp-proto-http>=1.29,<2.0
 # documented way to run the suite without a local Python at all.
 pytest>=8.3,<9.0
 httpx>=0.28,<1.0
+# Listed explicitly even though chromadb already pulls it in: the Navigator
+# layer test validates against the vendored JSON Schema, and a test that
+# depends on a transitive dependency breaks the day that dependency drops it.
+jsonschema>=4.20,<5.0
 # Lint. Configured in ruff.toml; CI runs `ruff check app tests`.
 ruff>=0.8,<1.0

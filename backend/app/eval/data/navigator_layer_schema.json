@@ -1,0 +1,303 @@
+{
+ "type": "object",
+ "properties": {
+  "versions": {
+   "$ref": "#/$defs/Version"
+  },
+  "name": {
+   "type": "string"
+  },
+  "description": {
+   "type": "string"
+  },
+  "domain": {
+   "type": "string"
+  },
+  "customDataURL": {
+   "type": "string"
+  },
+  "filters": {
+   "$ref": "#/$defs/Filter"
+  },
+  "sorting": {
+   "type": "number"
+  },
+  "layout": {
+   "$ref": "#/$defs/Layout"
+  },
+  "hideDisabled": {
+   "type": "boolean"
+  },
+  "techniques": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/Technique"
+   }
+  },
+  "gradient": {
+   "$ref": "#/$defs/Gradient"
+  },
+  "legendItems": {
+   "type": "array",
+   "items": {
+    "$ref": "#/$defs/LegendItem"
+   }
+  },
+  "showTacticRowBackground": {
+   "type": "boolean"
+  },
+  "tacticRowBackground": {
+   "type": "string"
+  },
+  "selectTechniquesAcrossTactics": {
+   "type": "boolean"
+  },
+  "selectSubtechniquesWithParent": {
+   "type": "boolean"
+  },
+  "selectVisibleTechniques": {
+   "type": "boolean"
+  },
+  "metadata": {
+   "type": "array",
+   "items": {
+    "anyOf": [
+     {
+      "$ref": "#/$defs/Metadata"
+     },
+     {
+      "$ref": "#/$defs/Divider"
+     }
+    ]
+   }
+  },
+  "links": {
+   "type": "array",
+   "items": {
+    "anyOf": [
+     {
+      "$ref": "#/$defs/Link"
+     },
+     {
+      "$ref": "#/$defs/Divider"
+     }
+    ]
+   }
+  }
+ },
+ "additionalProperties": false,
+ "required": [
+  "name",
+  "domain"
+ ],
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "title": "ATT&CK Navigator layer, format version 4.5",
+ "$defs": {
+  "Filter": {
+   "type": "object",
+   "properties": {
+    "platforms": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    }
+   },
+   "additionalProperties": false
+  },
+  "Version": {
+   "type": "object",
+   "properties": {
+    "attack": {
+     "type": "string"
+    },
+    "navigator": {
+     "type": "string"
+    },
+    "layer": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "navigator",
+    "layer"
+   ]
+  },
+  "Technique": {
+   "type": "object",
+   "properties": {
+    "techniqueID": {
+     "type": "string"
+    },
+    "tactic": {
+     "type": "string"
+    },
+    "comment": {
+     "type": "string"
+    },
+    "enabled": {
+     "type": "boolean"
+    },
+    "score": {
+     "type": "number"
+    },
+    "color": {
+     "type": "string"
+    },
+    "metadata": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/Metadata"
+       },
+       {
+        "$ref": "#/$defs/Divider"
+       }
+      ]
+     }
+    },
+    "links": {
+     "type": "array",
+     "items": {
+      "anyOf": [
+       {
+        "$ref": "#/$defs/Link"
+       },
+       {
+        "$ref": "#/$defs/Divider"
+       }
+      ]
+     }
+    },
+    "showSubtechniques": {
+     "type": "boolean"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "techniqueID"
+   ]
+  },
+  "Gradient": {
+   "type": "object",
+   "properties": {
+    "colors": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     }
+    },
+    "minValue": {
+     "type": "number"
+    },
+    "maxValue": {
+     "type": "number"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "colors",
+    "minValue",
+    "maxValue"
+   ]
+  },
+  "LegendItem": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string"
+    },
+    "color": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "label",
+    "color"
+   ]
+  },
+  "Metadata": {
+   "type": "object",
+   "properties": {
+    "name": {
+     "type": "string"
+    },
+    "value": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "name",
+    "value"
+   ]
+  },
+  "Link": {
+   "type": "object",
+   "properties": {
+    "label": {
+     "type": "string"
+    },
+    "url": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "label",
+    "url"
+   ]
+  },
+  "Divider": {
+   "type": "object",
+   "properties": {
+    "divider": {
+     "type": "boolean"
+    }
+   },
+   "additionalProperties": false,
+   "required": [
+    "divider"
+   ]
+  },
+  "Layout": {
+   "type": "object",
+   "properties": {
+    "layout": {
+     "type": "string"
+    },
+    "showID": {
+     "type": "boolean"
+    },
+    "showName": {
+     "type": "boolean"
+    },
+    "showAggregateScores": {
+     "type": "boolean"
+    },
+    "countUnscored": {
+     "type": "boolean"
+    },
+    "aggregateFunction": {
+     "type": "string"
+    },
+    "expandedSubtechniques": {
+     "type": "string"
+    }
+   },
+   "additionalProperties": false
+  }
+ },
+ "_source": {
+  "catalogue": "MITRE ATT&CK Navigator layer file format",
+  "version": "4.5",
+  "url": "https://raw.githubusercontent.com/mitre-attack/attack-navigator/master/layers/spec/v4.5/layerformat.md",
+  "sha256": "e3472d18187579e6fc119b26f7d53852a03d3d5d0d91a3eaa73357ac36b841b4",
+  "retrieved": "2026-08-10",
+  "licence": "The ATT&CK Navigator is © The MITRE Corporation, released under the Apache License 2.0: https://github.com/mitre-attack/attack-navigator",
+  "derivation": "The property tables of layerformat.md, translated to JSON Schema 2020-12 with additionalProperties disallowed. Generated by app/eval/vendor.py."
+ }
+}

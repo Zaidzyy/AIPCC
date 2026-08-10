@@ -88,6 +88,21 @@ def validate_sections(sections: ReportSections) -> ValidationResult:
     return result
 
 
+def check_technique(attack) -> list[Issue]:
+    """Every identifier problem with one attack finding, or an empty list.
+
+    The same check `validate_sections` runs, exposed for one finding at a time
+    so the ATT&CK matrix can decide whether a detection is trustworthy without
+    a second, drifting copy of the rules. It takes anything carrying
+    `attack_mitre_technique_id` and `attack_mitre_technique_name` — which is
+    both the Pydantic item and the ORM row, because Phase 1 made those field
+    names identical on purpose.
+    """
+    result = ValidationResult()
+    _check_technique(result, 0, attack)
+    return result.issues
+
+
 def _check_technique(result: ValidationResult, index: int, attack) -> None:
     technique_id = (attack.attack_mitre_technique_id or "").strip()
     if not technique_id:

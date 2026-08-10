@@ -60,7 +60,7 @@ backend/
       prune.py              # drops aged auth_attempts — never touches audit_log
     schemas/                # Pydantic: API request/response + LLM output schemas
     api/routers/            # auth, users, documents, reports, shares, chat,
-                            #   dashboard, alerts, api_keys, audit
+                            #   dashboard, alerts, api_keys, audit, attack
     services/
       rag/                  # ingest, chunk, embed  (ported from prototype)
       llm/                  # LLMProvider abstraction + implementations
@@ -75,13 +75,16 @@ backend/
       audit.py              # the append-only trail: action vocabulary, redaction, record()
       llm/pricing.py        # tokens -> money; unpriced model costs null, never 0
       grounding.py          # citation validation: fabricated chunk ids are caught here
+      attack_matrix.py      # the ATT&CK grid, detections on it, and the Navigator layer
     eval/                   # the evaluation harness — see backend/EVAL.md
-      data/                 # vendored MITRE ATT&CK + CWE, pinned and attributed
+      data/                 # vendored ATT&CK + CWE + the Navigator layer schema, all
+                            #   pinned, checksummed and attributed in SOURCES.md
       golden/               # committed log + hand-labelled expected findings
       fixtures/             # recorded provider responses, replayed by the CI gate
       validators.py         # MITRE / CVE / CWE checks
       metrics.py            # hallucination, grounding, recall, precision, cost
       run.py                # python -m app.eval.run [--live] [--record] [--gate]
+      vendor.py             # python -m app.eval.vendor [--only attack|cwe|navigator]
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -91,6 +94,7 @@ frontend/
   src/
     index.css               # @theme tokens — the whole design system lives here
     App.jsx                 # routes only
+    components/attack/      # the ATT&CK matrix grid and its technique dialog
     components/charts/      # Recharts wrappers; ChartGrid is lazy-loaded — see below
     components/motion/      # CSS/SVG feature animations (no deps)
     components/ui/          # design system primitives (Radix behaviour, own styling)
@@ -215,8 +219,7 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–10 complete and merged. Phase 11 (evaluation harness) complete on
-`phase-11-eval` — README and screenshots deliberately still not written.**
+**Phases 0–12 complete and merged — README and screenshots deliberately still not written.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -251,8 +254,13 @@ citations validated against what the model was actually shown, fabricated citati
 every finding's source log rows visible in the UI,
 **and an evaluation harness measuring hallucination and grounding rates against the real published
 MITRE ATT&CK and CWE catalogues and a hand-labelled golden log, with a deterministic replayed CI
-gate that needs no API key and an in-app Evaluation page.** 523 backend tests and 42 frontend
-tests pass; `ruff check` and `npm run lint` are both clean with no warnings.
+gate that needs no API key and an in-app Evaluation page,
+**and the MITRE ATT&CK matrix — tactics and the tactic→technique grid vendored from the same
+pinned ATT&CK release the validator reads, per-report and aggregate detection endpoints, a
+readable 14-column matrix whose cells trace back to the findings behind them, and an ATT&CK
+Navigator layer export validated against a JSON Schema derived from MITRE's published spec.**
+554 backend tests and 52 frontend tests pass; `ruff check` and `npm run lint` are both clean with
+no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
 verified manually. The n8n workflow JSONs are corrected and their
@@ -1096,5 +1104,111 @@ replay mode. All three are in `EVAL.md` under "What it does not prove".
   Valid ids, unusable output. The attack prompt now requires exactly one identifier.
 - **The recorder's own pacing collapsed on failure**, because `_last_call` was only stamped after a
   successful call — so the first rate-limited call removed all spacing from the rest.
+
+### Decisions taken in Phase 12 — the MITRE ATT&CK matrix
+
+**The reference data, again from the publisher:**
+
+- **Tactics come from the same pinned download the validator already reads.** Phase 11 needed only
+  `{technique id: name}`; the matrix needs the columns and the tactic→technique mapping too, and
+  taking those from a second source would let the grid and the hallucination checker disagree about
+  what ATT&CK contains. `vendor.py` now also projects `x-mitre-tactic` objects and each
+  attack-pattern's `kill_chain_phases`. 823 techniques, 14 tactics, 679 techniques placed.
+- **Column order is read from the bundle's own `x-mitre-matrix` object**, not sorted by TA-number.
+  The published matrix runs Reconnaissance → Impact, which is the order every analyst reads it in;
+  sorting by id happens to agree today and would silently stop agreeing the moment MITRE inserts
+  one. A tactic the matrix object does not list raises rather than being dropped.
+- **`--only` was added to the vendor script.** The CWE URL is `cwec_latest.xml.zip` — deliberately
+  unpinned upstream — so re-running the whole script to refresh ATT&CK would bump the committed CWE
+  catalogue version as a side effect of an unrelated change.
+- **The Navigator layer format is vendored too, as a derived JSON Schema.** MITRE publishes the
+  format as markdown property tables and no machine-readable schema, so `vendor_navigator_schema()`
+  parses those tables into JSON Schema 2020-12, checksums the source document and records it in
+  `SOURCES.md`. Same discipline as the catalogues: an approximated format is how you ship a file
+  that looks right and does not open.
+- **The derived schema disallows unknown properties**, which the prose does not say in so many
+  words — but the tables enumerate the format exhaustively, so a key absent from them is not part
+  of it. That strictness is the entire reason to have the schema: it is what turns `techniqueId`
+  into a failing test rather than a field the Navigator silently ignores.
+- **An unrecognised type string in the spec raises.** A permissive fallback would let a future
+  revision quietly degrade the schema into one that validates anything.
+
+**What happens to a technique the model got wrong** — the phase asked for a decision, and it is
+two decisions, because there are two different failures:
+
+- **Real id, wrong name → placed, and marked `unverified`.** The detection happened; the model's
+  description of it did not survive the check. The cell carries the **catalogue's** name, never the
+  model's, because rendering the model's wording onto a matrix cell would print the fabrication as
+  a label. Amber marker, and the dialog states the mismatch in the validator's own words.
+- **Non-existent, malformed, or retired → no cell at all, and reported beside the matrix.** There
+  is no column to put them in; inventing a placement would be the fabrication again, in our UI.
+  Retired ids are here for a reason worth keeping straight: `T1022` was real, so it is not a
+  hallucination — but MITRE does not draw revoked techniques on the published matrix, so neither
+  does this.
+- **Neither is ever dropped.** Dropping either would make the matrix look cleaner than the output
+  behind it — the same failure as an empty section reported as a success.
+- **Unplaceable ids are absent from the Navigator layer's `techniques` but named in its
+  `description` and counted in its `metadata`.** A layer is a set of cells and they have none; a
+  file that simply omitted them would read as a clean run.
+
+**The layer:**
+
+- **No entry pins a detection to a tactic.** A finding says a technique was observed; it does not
+  say under which tactic. Navigator reads a missing `tactic` as "annotate under every column this
+  technique appears in", which is exactly what is known — pinning each one to a single column would
+  put a guess into a file an analyst reads as data.
+- **`versions.navigator` is `4.9.0`, the spec's own stated minimum**, not the newest release.
+  Claiming the latest would assert compatibility with something never tested here.
+- **An unverified cell gets an explicit `color`, which overrides the gradient in Navigator.** That
+  is the point: "we could not stand behind this one" must not render as "this one was seen once".
+- **`gradient.maxValue` is floored at 1.** `maxValue` must be strictly greater than `minValue`, so
+  a layer with a single detection would otherwise emit `0..0` and fail to open.
+- **A layer export is audited as `report.export` with `format: navigator-layer`**, rather than as a
+  new action. It is a report leaving the system, and one vocabulary keeps "what left, and when"
+  answerable with one query.
+
+**The grid, and how it stays readable** — the phase named three options and this took the third
+plus one of the others:
+
+- **Sub-techniques do not get cells.** 679 placed techniques collapse to 211 parents, so the whole
+  grid is ~245 cells and needs no virtualisation at all. A detection on `T1059.001` shades the
+  `T1059` cell and the cell says how many sub-techniques are behind it.
+- **All fourteen columns are always drawn, including empty ones.** The recognisable thing about
+  this diagram is its shape; hiding quiet tactics redraws it per report and loses the "nothing was
+  seen here" reading, which on a security page is information. An empty column says "No detections"
+  rather than being an empty box.
+- **A density switch rather than a scroll trick**: "Detected only" is the honest default for a
+  report, "Full matrix" shows the coverage gap.
+- **Frequency is an ink ramp, not a hue** — Phase 4's rule, unchanged: a darker cell already says
+  "more", and spending a colour on volume dilutes every colour that means something. The only
+  chroma on the grid is amber, and it means exactly one thing: this identifier did not verify.
+  (The phase brief said "colour encodes detection intensity"; the app's standing rule won, because
+  a page where hue means both "frequent" and "severe" makes both unreadable.)
+- **The five shading bands are written out in full**, never assembled — the Tailwind scan rule that
+  already cost this project a bug in Phase 3.
+- **No new dependency and no lazy boundary.** The matrix is CSS grid and buttons; there was nothing
+  to import, so unlike the charts it costs the bundle nothing.
+- **`/attack/matrix` is not owner-scoped and is cached with `staleTime: Infinity`.** It is MITRE's
+  data, identical for every caller, and re-fetching 89 KB of grid per navigation would be the most
+  expensive no-op in the app. The detections beside it are scoped exactly as `/reports` is.
+
+**Two smaller decisions:**
+
+- **`reports_considered` is counted separately from the join.** A report that named no technique
+  still had its log read; taking the denominator from the joined rows would silently drop it and
+  inflate any rate computed from those two numbers.
+- **The `--demo` seed now contains three deliberately defective identifiers** — one real-id/wrong-
+  name, one invented, one revoked. Without them a demo database renders fourteen clean detections
+  and the part of the page that matters, how a bad identifier is *handled*, has no data and looks
+  like a feature nobody built. It is the same argument Phase 11 makes for committing the weak
+  model's cassette: output with no defects in it cannot demonstrate a validator.
+
+**Verified by running:** the page renders 15 techniques over 141 detections from 44 real seeded
+reports, with `T1053` shaded amber and its dialog quoting *"T1053 is 'Scheduled Task/Job', not
+'Cron Job Persistence'"*, `T1888` and `T1022` listed below the grid as unplaceable, per-report
+scoping narrowing it to 3 techniques over 4 detections, and the exported layer validating against
+the derived schema. **Not verified:** the layer has not been opened in the live ATT&CK Navigator —
+the browser tooling available here refuses `mitre-attack.github.io` — so what is proven is
+conformance to the published format, not the round trip through MITRE's app.
 
 **Update this section at the end of every phase.**

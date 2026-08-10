@@ -1,4 +1,5 @@
 import {
+  Crosshair,
   FileText,
   LayoutDashboard,
   FlaskConical,
@@ -28,6 +29,7 @@ const GROUPS = [
       { to: "/generate", label: "Generate", icon: Sparkles },
       { to: "/reports", label: "Reports", icon: FileText },
       { to: "/alerts", label: "Alerts", icon: ShieldAlert },
+      { to: "/attack", label: "ATT&CK matrix", icon: Crosshair },
       { to: "/chat", label: "Chat", icon: MessageSquare },
       { to: "/evaluation", label: "Evaluation", icon: FlaskConical },
     ],
