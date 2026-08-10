@@ -23,10 +23,17 @@ from app.api.routers import (
     users,
 )
 from app.core.config import settings
+from app.core.correlation import CorrelationIdMiddleware
+from app.core.logging import AccessLogMiddleware, configure_logging
 from app.core.middleware import SecurityHeadersMiddleware
+from app.core.tracing import configure_tracing
 
 
 def create_app() -> FastAPI:
+    # Before anything else, so a failure during router import is logged in the
+    # configured format rather than by whatever handler logging fell back to.
+    configure_logging()
+
     app = FastAPI(
         title=settings.app_name,
         description="AI-Powered Cybersecurity Co-Pilot",
@@ -54,6 +61,14 @@ def create_app() -> FastAPI:
     # answers by itself, and anything an exception handler produces.
     app.add_middleware(SecurityHeadersMiddleware)
 
+    # Then the access log, then correlation — so correlation ends up outermost
+    # of the three. `add_middleware` prepends, so the id is established before
+    # the access log runs and is therefore on the line the access log writes;
+    # reversing these two produces a request log with a null correlation id,
+    # which is the one field it exists for.
+    app.add_middleware(AccessLogMiddleware)
+    app.add_middleware(CorrelationIdMiddleware)
+
     app.include_router(health.router)
     app.include_router(auth.router)
     app.include_router(users.router)
@@ -65,6 +80,11 @@ def create_app() -> FastAPI:
     app.include_router(alerts.router)
     app.include_router(api_keys.router)
     app.include_router(audit.router)
+
+    # Last, because instrumenting FastAPI wraps the finished middleware stack.
+    # No-op unless OTEL_ENABLED — see `core/tracing.py` on why it is off by
+    # default.
+    configure_tracing(app)
 
     return app
 

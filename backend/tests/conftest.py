@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from opentelemetry import trace
+from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from sqlalchemy.orm import Session, sessionmaker
 
 from app.core.security import hash_password
@@ -16,6 +20,34 @@ from app.main import app
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PASSWORD = "test-password-123"
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _tracing() -> InMemorySpanExporter:
+    """Install one in-memory tracer provider for the whole session.
+
+    It has to be session-scoped and autouse, and both of those are forced by
+    how OpenTelemetry resolves providers. Modules capture their tracer at
+    import time, which yields a `ProxyTracer`; that proxy binds to whatever
+    provider exists the *first* time a span is started and caches it forever.
+    So a per-test provider works exactly once — the first tracing test passes
+    and every later one sees an empty exporter. Found that way.
+
+    Installing before any test runs means every span in the suite lands here,
+    which costs nothing and makes the `spans` fixture a simple `clear()`.
+    """
+    exporter = InMemorySpanExporter()
+    provider = TracerProvider()
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+    trace.set_tracer_provider(provider)
+    return exporter
+
+
+@pytest.fixture
+def spans(_tracing) -> InMemorySpanExporter:
+    """Spans produced by this test alone."""
+    _tracing.clear()
+    return _tracing
 
 
 @pytest.fixture

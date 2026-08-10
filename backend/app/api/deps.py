@@ -57,6 +57,12 @@ def get_current_user(
 
     if user.status.lower() != "active":
         raise HTTPException(status.HTTP_403_FORBIDDEN, f"account is {user.status}")
+
+    # Published for the access log, which runs outside the dependency graph and
+    # has no other way to learn who the caller was. Set only after the status
+    # check, so a suspended account is never attributed an authenticated
+    # request it was refused.
+    request.state.actor_id = str(user.user_id)
     return user
 
 

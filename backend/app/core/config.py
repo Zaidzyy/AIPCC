@@ -8,7 +8,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 # Repo-root-relative anchor so default paths resolve the same way whether the
@@ -20,6 +20,19 @@ REPO_ROOT = BACKEND_DIR.parent
 
 # RFC 7518 §3.2 minimum for HS256.
 MIN_JWT_SECRET_BYTES = 32
+
+
+class ModelPrice(BaseModel):
+    """What one model costs, per million tokens, in USD.
+
+    Per *million* rather than per token because that is the unit every provider
+    publishes, so a value copied off a pricing page can be pasted in unchanged.
+    Converting by hand is how a price ends up wrong by three orders of
+    magnitude in a way nobody notices until the total looks plausible.
+    """
+
+    input_usd_per_1m: float = Field(ge=0)
+    output_usd_per_1m: float = Field(ge=0)
 
 
 class Settings(BaseSettings):
@@ -64,6 +77,50 @@ class Settings(BaseSettings):
     groq_model: str = "llama-3.3-70b-versatile"
     ollama_base_url: str = "http://localhost:11434"
     ollama_model: str = "llama3.1"
+
+    # --- Observability (Phase 9) -------------------------------------------
+    # `auto` means JSON everywhere except `local`, where a human is reading the
+    # terminal. Pinned explicitly when you want the other one — reproducing a
+    # log-parsing bug locally, or reading a container log by eye.
+    log_level: str = "INFO"
+    log_format: Literal["auto", "json", "console"] = "auto"
+
+    # Tracing is **off by default**, and the exporter it defaults to when turned
+    # on is the console. Emitting a span dump to stdout on every request out of
+    # the box would make `docker compose up` unreadable and would be the first
+    # thing anyone switched off — see CLAUDE.md > Phase 9.
+    otel_enabled: bool = False
+    otel_service_name: str = "aipcc-backend"
+    # Set this and spans go to a collector instead of the console. Base URL,
+    # e.g. http://localhost:4318 — the exporter appends /v1/traces.
+    otel_exporter_otlp_endpoint: str | None = None
+
+    # --- LLM cost accounting ------------------------------------------------
+    # Prices are **configuration, not constants**: they change without warning,
+    # they differ per account, and a number compiled into the code is one nobody
+    # will remember to look at. Override with the LLM_PRICES env var as JSON:
+    #
+    #   LLM_PRICES={"gemini-2.5-flash":{"input_usd_per_1m":0.3,"output_usd_per_1m":2.5}}
+    #
+    # The defaults below are published list prices as of 2026-08 and are a
+    # starting point, not a source of truth — check them against the provider's
+    # pricing page before quoting any figure this app produces.
+    #
+    # A model that is **not in this table costs `null`, never `0`.** "I do not
+    # know what this costs" and "this is free" are the pair of states that must
+    # never look alike, exactly as on the dashboard aggregates. Ollama is the
+    # only genuine zero, because it runs locally — and it still reports tokens.
+    llm_prices: dict[str, ModelPrice] = Field(
+        default_factory=lambda: {
+            "gemini-2.5-flash": ModelPrice(input_usd_per_1m=0.30, output_usd_per_1m=2.50),
+            "gemini-2.5-pro": ModelPrice(input_usd_per_1m=1.25, output_usd_per_1m=10.00),
+            "llama-3.3-70b-versatile": ModelPrice(
+                input_usd_per_1m=0.59, output_usd_per_1m=0.79
+            ),
+            # Local. Free at the point of use, and the tokens still count.
+            "llama3.1": ModelPrice(input_usd_per_1m=0.0, output_usd_per_1m=0.0),
+        }
+    )
 
     # --- RAG / vector store ------------------------------------------------
     chroma_dir: Path = BACKEND_DIR / "chroma_langchain_db"

@@ -49,6 +49,9 @@ backend/
       api_key.py            # long-lived machine credentials (SHA-256, not bcrypt)
       share_token.py        # read-one-report capability tokens (neither JWT nor API key)
       middleware.py         # security response headers — two CSPs: API vs /docs
+      correlation.py        # one request id: response header, every log line, every audit row
+      logging.py            # JSON in ci/prod, console in local; the access log
+      tracing.py            # OpenTelemetry — off by default, console or OTLP
     db/
       session.py            # engine + session factory (NEVER drop/create on import)
       models.py             # SQLAlchemy models
@@ -70,6 +73,7 @@ backend/
       share.py              # share-link rules: creation, expiry, revocation, classification
       ratelimit.py          # IP lockout + per-account progressive delay, state in Postgres
       audit.py              # the append-only trail: action vocabulary, redaction, record()
+      llm/pricing.py        # tokens -> money; unpriced model costs null, never 0
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -197,8 +201,8 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–7 complete and merged. Phase 8 (security hardening + audit trail) complete on
-`phase-8-hardening`, not yet merged — README and screenshots deliberately still not written.**
+**Phases 0–8 complete and merged. Phase 9 (observability + LLM cost accounting) complete on
+`phase-9-observability` — README and screenshots deliberately still not written.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -224,8 +228,12 @@ Postgres service container alongside frontend lint + tests + build,
 **and login brute-force protection — a hard per-IP lockout plus a per-account progressive delay
 that is never a lock — security response headers on every response with separate policies for the
 API and its docs, and an append-only audit log enforced by a Postgres trigger, with an admin-only
-filterable view.** 377 backend tests and 32 frontend tests pass; `ruff check` and `npm run lint`
-are both clean with no warnings.
+filterable view,
+**and end-to-end observability: a correlation id on every response header, log line and audit row,
+structured JSON logging, OpenTelemetry spans across HTTP/SQL/retrieval/LLM, and per-call LLM token
+and cost accounting captured at the provider seam and surfaced as three dashboard charts.**
+425 backend tests and 39 frontend tests pass; `ruff check` and `npm run lint` are both clean with
+no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
 verified manually. The n8n workflow JSONs are corrected and their
@@ -786,5 +794,100 @@ loads with fonts, ambient video and HMR intact and no CSP violations in the cons
 sequence of failed logins against the running server showed 401 at ~510 ms for the first three,
 2.5 s on the fourth, 4.5 s on the fifth and `429` with `Retry-After: 891` on the sixth, all of it
 landing in the audit view.
+
+### Decisions taken in Phase 9 — observability and cost accounting
+
+**Correlation:**
+
+- **A `ContextVar`, not a parameter.** Threading an id through `generate_report` →
+  `generate_section` → `LLMProvider.generate` would put an observability concern in the signature
+  of every function it passes, and the first place somebody forgot to pass it would be a silent
+  hole rather than an error. `contextvars` propagates into `asyncio.gather` tasks and across
+  `asyncio.to_thread` for free, which is exactly the fan-out this app uses.
+- **An inbound `X-Request-ID` is untrusted input.** It is echoed in a response header and written
+  into log records, so a newline in it forges a log line and a CR forges a header. Filtered to
+  `[A-Za-z0-9_-]`, truncated to 64, and replaced entirely if nothing survives — an empty string
+  would read as "no correlation" everywhere downstream.
+- **Correlation is added to the middleware stack last**, so it ends up outermost and the id exists
+  before the access log runs. Reversed, every request line carries a null id — the one field it
+  exists for.
+
+**Logging:**
+
+- **Ours replaces uvicorn's access log rather than joining it.** Uvicorn's is unstructured, carries
+  no actor and no correlation id, and cannot be made to; running both doubles every request.
+- **The access line logs the route *template*, never the resolved path.** `/reports/{report_id}` is
+  one log key; the resolved path is one per report, which makes the log unaggregatable and puts
+  identifiers into it for no benefit. The query string is dropped outright.
+- **`default=str` in the JSON formatter.** A UUID or a datetime passed in an `extra=` must not be
+  able to take down logging — a log line is not the place to raise.
+
+**Tracing:**
+
+- **Off by default, and that is the honest reading of "console exporter by default".** The console
+  exporter prints a multi-line dump per span; enabled out of the box, `docker compose up` becomes a
+  wall of JSON and the first thing anyone does is switch it off. `OTEL_ENABLED=true` turns it on,
+  and Jaeger sits behind an optional compose profile so the default run stays one command.
+- **Four things are traced** — HTTP, SQL, retrieval, and each LLM call — because those are the four
+  places a report generation spends time. The first two come from instrumentation packages; the
+  last two are hand-written, since there is no off-the-shelf instrumentation for what this app does.
+- **No prompt, completion or document content on any span.** Traces ship to a collector; log data
+  does not leave this system that way. Spans carry counts, models, latencies and section names.
+- **Instrumentation failing must not stop the app booting.** Observability is how you find out
+  something is wrong; it does not get to be the thing that is wrong.
+
+**Cost accounting:**
+
+- **`LLMProvider` is the seam, and `generate()` in the base class does the measuring.** Every LLM
+  call in the app goes through it — sections, repair retries, chat — so the accounting cannot miss
+  a path added later, and a fourth provider is measured without its author doing anything. The
+  abstract method became `_invoke`; `complete()` is now a thin wrapper. A test fake that overrode
+  the *public* method would skip the timing and the token capture entirely, so both fakes were
+  moved to `_invoke` and that is written down where they live.
+- **Unknown is null, never zero — three times over.** A provider that reports no usage gives null
+  tokens; a model absent from the price table gives a null cost; a report with no usage rows gets
+  null totals rather than `0`. Zero would put "this was free" and "nobody measured it" in the same
+  bucket, quietly drag every aggregate down, and leave a figure that still looks plausible. Same
+  rule as `UNKNOWN` integrity and the dashboard's `—`, and `formatUsd` in the frontend has its own
+  test because one `?? 0` there would undo all of it.
+- **Prices are configuration, in USD per *million* tokens.** That is the unit every provider
+  publishes, so a value can be pasted off a pricing page unconverted — converting by hand is how a
+  price ends up wrong by three orders of magnitude in a way nobody notices. Model lookup falls back
+  to the **longest** matching configured key, so `gemini-2.5-flash-lite` is not billed at
+  `gemini-2.5-flash` rates. Ollama is in the table as an explicit zero rather than by omission:
+  free because it is local, with tokens still counted.
+- **A row per call, not per section.** That is what makes the retry rate measurable at all — a
+  section that needed its repair prompt writes two rows, and the first is the interesting one.
+- **Usage is recorded before the response is judged.** A call that produced unusable JSON still
+  spent its tokens, and a cost that counted only successful calls would understate exactly the
+  reports that went wrong most expensively. A provider *outage* records nothing, because that call
+  never reached the model and inventing zeros for it would drag every average down.
+- **Chat spend lands in the same table**, with a null `report_id`. Leaving it out would make "what
+  does this system cost to run" quietly exclude a whole feature.
+- **Usage is attributed to the report's owner, not the caller** — Phase 5's rule, so an
+  n8n-generated report's spend appears on the analyst's dashboard rather than the service account's.
+- **`generation_ms` is wall-clock, not the sum of section latencies.** The sections run
+  concurrently; summing them reports about five times the truth. Measured: 94 ms elapsed against
+  459 ms summed.
+- **p95 as well as p50, computed with `percentile_cont` in Postgres.** A mean over five concurrent
+  sections hides the one slow section that decides how long the analyst actually waited. Reports
+  with no timing — pre-Phase-9 rows, and anything stored by n8n — are excluded rather than counted
+  as fast.
+- **`unpriced_calls` is surfaced on the dashboard**, because a total that silently excludes calls
+  nobody could price reads as complete when it is not.
+- **The cost charts are graphite.** Spend is not a severity and not a state, so under this app's
+  colour rule it gets no hue; a taller area already says "more". They live in the *same* lazy chunk
+  as the other four, because a second `React.lazy` boundary would download Recharts twice.
+
+**Bugs and traps found in Phase 9:**
+
+- **OpenTelemetry's proxy tracer caches its provider on first use.** Modules capture a tracer at
+  import time, which yields a `ProxyTracer` that binds to whatever provider exists the first time a
+  span is started — and keeps it. A per-test provider therefore works exactly once: the first
+  tracing test passed and every later one saw an empty exporter. Fixed with one session-scoped
+  autouse provider in `conftest.py`.
+- **A test asserted against the wrong log line.** `next(r for r in caplog.records ...)` returns the
+  *first* access record, which for a test that had to mint an API key first was the JWT call that
+  minted it. The helper now returns the list and callers take the last.
 
 **Update this section at the end of every phase.**

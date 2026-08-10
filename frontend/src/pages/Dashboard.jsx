@@ -33,14 +33,24 @@ import {
 import { useAuth } from "@/context/AuthContext";
 import {
   useAnomaliesOverTime,
+  useCostOverTime,
   useDashboardSummary,
+  useGenerationLatency,
   useReport,
   useReports,
   useReportsOverTime,
   useSeverityBreakdown,
+  useTokensBySection,
   useTopAttackTypes,
+  useUsageSummary,
 } from "@/hooks/queries";
-import { formatRelative, severityCounts, statusToken } from "@/lib/format";
+import {
+  formatRelative,
+  formatTokens,
+  formatUsd,
+  severityCounts,
+  statusToken,
+} from "@/lib/format";
 
 /**
  * Recharts is the largest dependency in the app and only this route draws
@@ -48,6 +58,10 @@ import { formatRelative, severityCounts, statusToken } from "@/lib/format";
  * aggregate requests rather than in front of the first paint.
  */
 const ChartGrid = lazy(() => import("@/components/charts/ChartGrid"));
+// The same chunk, so Recharts is still downloaded exactly once.
+const CostCharts = lazy(() =>
+  import("@/components/charts/ChartGrid").then((module) => ({ default: module.CostCharts })),
+);
 
 const WINDOWS = [
   { value: "7", label: "7 days" },
@@ -71,6 +85,11 @@ export function Dashboard() {
   const attacks = useTopAttackTypes(8);
   const anomalies = useAnomaliesOverTime(days);
   const reports = useReports();
+
+  const usage = useUsageSummary();
+  const cost = useCostOverTime(days);
+  const tokens = useTokensBySection();
+  const latency = useGenerationLatency(days);
 
   const latestId = reports.data?.[0]?.report_id;
   const latest = useReport(latestId);
@@ -187,6 +206,59 @@ export function Dashboard() {
         </div>
       )}
 
+      {/* "What was found" and "what it cost to find it" are two different
+          questions and read badly interleaved, so the cost panel is its own
+          section with its own heading rather than four more cards in the grid
+          above. It is only drawn once there is spend to show — a row of `—`
+          on a fresh install would look broken rather than empty. */}
+      {usage.data?.calls > 0 && (
+        <section className="mb-6">
+          <div className="mb-4 flex items-baseline justify-between gap-4">
+            <div>
+              <p className="eyebrow">Operations</p>
+              <h2 className="mt-1 font-mono text-lg font-semibold text-ink">
+                What this costs to run
+              </h2>
+            </div>
+          </div>
+
+          <div className="mb-6 grid gap-px overflow-hidden rounded-lg border border-line bg-line/60 sm:grid-cols-2 xl:grid-cols-4">
+            <Stat label="Total spend" value={formatUsd(usage.data.total_cost_usd)} query={usage} raw />
+            <Stat
+              label="Cost per report"
+              value={formatUsd(usage.data.cost_per_report_usd)}
+              query={usage}
+              raw
+              hint="Averaged over reports this app generated"
+            />
+            <Stat label="Tokens" value={formatTokens(usage.data.total_tokens)} query={usage} raw />
+            <Stat
+              label="Retry rate"
+              value={`${(usage.data.retry_rate * 100).toFixed(1)}%`}
+              query={usage}
+              raw
+              tone={usage.data.retry_rate > 0.2 ? "medium" : undefined}
+              hint={`${usage.data.retries} of ${usage.data.calls} calls needed a repair prompt`}
+            />
+          </div>
+
+          {/* Stated rather than hidden. A total that silently excludes calls
+              nobody could price reads as complete when it is not. */}
+          {usage.data.unpriced_calls > 0 && (
+            <p className="mb-4 text-[0.8125rem] text-ink-faint">
+              {usage.data.unpriced_calls} of {usage.data.calls} calls could not be priced — their
+              model is not in the price table, so the total above excludes them.
+            </p>
+          )}
+
+          <div className="grid gap-6 xl:grid-cols-[1.5fr_1fr]">
+            <Suspense fallback={<ChartPlaceholders count={3} />}>
+              <CostCharts query={{ cost, tokens, latency }} days={days} windowPicker={windowPicker} />
+            </Suspense>
+          </div>
+        </section>
+      )}
+
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">
         <LatestReport summary={reports.data?.[0]} detail={latest} loading={reports.isPending} />
         <RecentReports query={reports} />
@@ -202,7 +274,13 @@ function attentionTone(summary) {
   return summary.attention_required > 0 ? "medium" : "ok";
 }
 
-function Stat({ label, value, hint, query, icon: Icon, tone }) {
+/**
+ * `raw` means the value has already been formatted by the caller — `formatUsd`
+ * and friends decide what `null` looks like, and they render it as `—` rather
+ * than `$0.00`. Without it the `value ?? 0` below would turn "not measured"
+ * into "free", which is the one substitution this project refuses everywhere.
+ */
+function Stat({ label, value, hint, query, icon: Icon, tone, raw = false }) {
   const toneClass = {
     critical: "text-critical",
     high: "text-high",
@@ -228,7 +306,7 @@ function Stat({ label, value, hint, query, icon: Icon, tone }) {
             toneClass ?? "text-ink"
           }`}
         >
-          {value ?? 0}
+          {raw ? value : (value ?? 0)}
         </p>
       )}
       {hint && !query.isPending && !query.isError && (
@@ -240,10 +318,10 @@ function Stat({ label, value, hint, query, icon: Icon, tone }) {
 
 /** Holds the grid's shape while the chart chunk downloads, so the KPI row and
  *  the report list below it do not jump when the charts arrive. */
-function ChartPlaceholders() {
+function ChartPlaceholders({ count = 4 }) {
   return (
     <>
-      {[230, 230, 290, 230].map((height, index) => (
+      {[230, 230, 290, 230].slice(0, count).map((height, index) => (
         <Card key={index}>
           <CardHeader>
             <Skeleton className="h-4 w-40" />

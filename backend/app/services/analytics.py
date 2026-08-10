@@ -34,9 +34,13 @@ from app.db import models
 from app.schemas.dashboard import (
     AnomalyBucket,
     AttackTypeCount,
+    CostBucket,
     KpiSummary,
+    LatencyBucket,
     ReportBucket,
+    SectionTokens,
     SeveritySlice,
+    UsageSummary,
 )
 from app.services.severity import SEVERITY_ORDER, SEVERITY_PREFIXES, UNKNOWN
 
@@ -268,6 +272,185 @@ def anomalies_over_time(db: Session, user: models.Users, days: int) -> list[Anom
     ]
 
 
+# --- Cost, tokens and latency (Phase 9) -----------------------------------
+#
+# Same rules as everything above: aggregate in SQL, emit a bucket per day, and
+# never let a null become a zero. That last one matters more here than anywhere
+# else on the dashboard, because these are money: a `$0.00` for a day whose
+# provider reported no usage is a claim, and a wrong one.
+
+
+def _usage_scope(statement: Select, user: models.Users) -> Select:
+    return _scope(statement, user, models.LlmUsage.user_id)
+
+
+def cost_over_time(db: Session, user: models.Users, days: int) -> list[CostBucket]:
+    """LLM spend per day, with empty days as explicit zero-call buckets."""
+    start = _window_start(days)
+    day = func.date_trunc("day", models.LlmUsage.created_at).label("day")
+
+    rows = db.execute(
+        _usage_scope(
+            select(
+                day,
+                func.sum(models.LlmUsage.cost_usd).label("cost"),
+                func.sum(models.LlmUsage.total_tokens).label("tokens"),
+                func.count().label("calls"),
+            ).where(models.LlmUsage.created_at >= start),
+            user,
+        )
+        .group_by(day)
+        .order_by(day)
+    ).all()
+
+    by_day = {_as_date(row.day): row for row in rows}
+    buckets: list[CostBucket] = []
+    for bucket_day in _day_index(start, days):
+        row = by_day.get(bucket_day)
+        buckets.append(
+            CostBucket(
+                day=bucket_day,
+                # A day with no calls costs nothing and that *is* zero — the
+                # absence of spend, not an unmeasured amount. A day with calls
+                # whose cost is null stays null.
+                cost_usd=(0.0 if row is None else row.cost),
+                total_tokens=(0 if row is None else row.tokens),
+                calls=row.calls if row else 0,
+            )
+        )
+    return buckets
+
+
+def tokens_by_section(db: Session, user: models.Users) -> list[SectionTokens]:
+    """Where the tokens go — the five report sections, plus chat.
+
+    Ordered by total tokens descending rather than by the section order used
+    everywhere else: the question this answers is "what is expensive", and the
+    answer should be the first row.
+    """
+    rows = db.execute(
+        _usage_scope(
+            select(
+                models.LlmUsage.section,
+                func.sum(models.LlmUsage.prompt_tokens).label("prompt"),
+                func.sum(models.LlmUsage.completion_tokens).label("completion"),
+                func.sum(models.LlmUsage.total_tokens).label("total"),
+                func.sum(models.LlmUsage.cost_usd).label("cost"),
+                func.count().label("calls"),
+            ),
+            user,
+        )
+        .group_by(models.LlmUsage.section)
+        .order_by(func.coalesce(func.sum(models.LlmUsage.total_tokens), 0).desc())
+    ).all()
+
+    return [
+        SectionTokens(
+            section=row.section,
+            prompt_tokens=row.prompt,
+            completion_tokens=row.completion,
+            total_tokens=row.total,
+            cost_usd=row.cost,
+            calls=row.calls,
+        )
+        for row in rows
+    ]
+
+
+def generation_latency(db: Session, user: models.Users, days: int) -> list[LatencyBucket]:
+    """p50 and p95 end-to-end report generation time, per day.
+
+    `percentile_cont` in Postgres, not a sort in Python. The p95 is the point:
+    a mean over five concurrent sections hides the one slow section that
+    actually decides how long the analyst waited.
+
+    Measured on `reports.generation_ms` — wall-clock for the whole fan-out —
+    rather than on individual call latencies, which would answer a different
+    and much less useful question.
+    """
+    start = _window_start(days)
+    day = func.date_trunc("day", models.Report.generated_at).label("day")
+
+    rows = db.execute(
+        _scope(
+            select(
+                day,
+                func.percentile_cont(0.5)
+                .within_group(models.Report.generation_ms)
+                .label("p50"),
+                func.percentile_cont(0.95)
+                .within_group(models.Report.generation_ms)
+                .label("p95"),
+                func.count().label("reports"),
+            ).where(
+                models.Report.generated_at >= start,
+                # Reports that predate Phase 9, and those stored by n8n, have
+                # no timing. Including them would drag the percentile toward a
+                # number that was never measured.
+                models.Report.generation_ms.is_not(None),
+            ),
+            user,
+            models.Report.user_id,
+        )
+        .group_by(day)
+        .order_by(day)
+    ).all()
+
+    by_day = {_as_date(row.day): row for row in rows}
+    return [
+        LatencyBucket(
+            day=bucket_day,
+            p50_ms=by_day[bucket_day].p50 if bucket_day in by_day else None,
+            p95_ms=by_day[bucket_day].p95 if bucket_day in by_day else None,
+            reports=by_day[bucket_day].reports if bucket_day in by_day else 0,
+        )
+        for bucket_day in _day_index(start, days)
+    ]
+
+
+def usage_summary(db: Session, user: models.Users) -> UsageSummary:
+    """Headline cost numbers, including how much of the total is unknowable."""
+    row = db.execute(
+        _usage_scope(
+            select(
+                func.sum(models.LlmUsage.cost_usd).label("cost"),
+                func.sum(models.LlmUsage.total_tokens).label("tokens"),
+                func.count().label("calls"),
+                # A retry is any call after the first for the same section.
+                # Counting rows with attempt > 1 is exact, which counting
+                # sections that "look retried" would not be.
+                func.count().filter(models.LlmUsage.attempt > 1).label("retries"),
+                func.count().filter(models.LlmUsage.cost_usd.is_(None)).label("unpriced"),
+            ),
+            user,
+        )
+    ).one()
+
+    reports = db.scalar(
+        _scope(
+            select(func.count(func.distinct(models.LlmUsage.report_id))).where(
+                models.LlmUsage.report_id.is_not(None)
+            ),
+            user,
+            models.LlmUsage.user_id,
+        )
+    ) or 0
+
+    calls = row.calls or 0
+    return UsageSummary(
+        total_cost_usd=row.cost,
+        total_tokens=row.tokens,
+        calls=calls,
+        retries=row.retries or 0,
+        retry_rate=round((row.retries or 0) / calls, 4) if calls else 0.0,
+        unpriced_calls=row.unpriced or 0,
+        # Divided by reports that actually have usage rows, not by every report
+        # the user owns — otherwise importing a hundred n8n reports would make
+        # the average cost per report collapse toward zero.
+        cost_per_report_usd=(row.cost / reports) if row.cost is not None and reports else None,
+    )
+
+
 # --- Shared ---------------------------------------------------------------
 
 
@@ -291,9 +474,13 @@ def _findings_subquery():
 __all__ = [
     "SEVERITY_ORDER",
     "anomalies_over_time",
+    "cost_over_time",
+    "generation_latency",
     "kpi_summary",
     "reports_over_time",
     "severity_breakdown",
     "severity_bucket",
+    "tokens_by_section",
     "top_attack_types",
+    "usage_summary",
 ]

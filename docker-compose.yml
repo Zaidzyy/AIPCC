@@ -96,6 +96,22 @@ services:
       - "5173:5173"
     restart: unless-stopped
 
+  # Optional. `docker compose up` stays four containers and one command; this
+  # only starts with `docker compose --profile tracing up`, alongside
+  # OTEL_ENABLED=true and OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4318 in
+  # .env. Then a report generation draws as one trace with five concurrent LLM
+  # spans at http://localhost:16686 — see CLAUDE.md > Phase 9.
+  jaeger:
+    image: jaegertracing/all-in-one:1.62
+    container_name: aipcc-jaeger
+    profiles: ["tracing"]
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+    ports:
+      - "16686:16686"  # UI
+      - "4318:4318"    # OTLP/HTTP, the endpoint the backend exports to
+    restart: unless-stopped
+
   n8n:
     image: n8nio/n8n:latest
     container_name: aipcc-n8n

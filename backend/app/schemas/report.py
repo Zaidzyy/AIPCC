@@ -185,11 +185,44 @@ class SectionError(BaseModel):
     raw_output: str | None = None
 
 
+class LlmCallRecord(BaseModel):
+    """What one LLM call cost, on its way to `llm_usage`.
+
+    A schema rather than an ORM object so `generate_report` stays free of the
+    database — the generator has never taken a `Session` and does not start
+    now. `store_report` turns these into rows.
+
+    Every token and cost field is optional because "the provider did not
+    report" is a real state, and it is not zero.
+    """
+
+    section: str
+    provider: str
+    model: str
+    attempt: int = 1
+    succeeded: bool = True
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    latency_ms: float
+    cost_usd: float | None = None
+    correlation_id: str | None = None
+
+
 class ReportGenerationResult(BaseModel):
     """Outcome of generating every section."""
 
     sections: ReportSections
     errors: list[SectionError] = Field(default_factory=list)
+    # Every LLM call the generation made, including the repair retries and the
+    # calls belonging to sections that ultimately failed. A failed section is
+    # not a free section — leaving its usage out would make the cost figure
+    # understate exactly the reports that cost the most to produce.
+    usage: list[LlmCallRecord] = Field(default_factory=list)
+    # Wall-clock for the whole concurrent fan-out. Deliberately not the sum of
+    # the section latencies: they run at the same time, so summing them would
+    # report roughly five times the elapsed time.
+    generation_ms: float | None = None
 
     @property
     def partial(self) -> bool:

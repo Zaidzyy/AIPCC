@@ -48,6 +48,20 @@ chromadb>=0.5.20,<2.0
 python-docx>=1.1,<2.0
 reportlab>=4.2,<5.0
 
+# --- Observability (Phase 9) ---
+# The SDK and the two instrumentations that cover the paths worth tracing: HTTP
+# in, SQL out. The LLM and retrieval spans are created by hand — there is no
+# instrumentation for "the thing this application actually does".
+#
+# The OTLP exporter is listed even though tracing defaults to the console
+# exporter, because the alternative is an ImportError the first time somebody
+# sets OTEL_EXPORTER_OTLP_ENDPOINT — a configuration change that fails at boot.
+opentelemetry-sdk>=1.29,<2.0
+opentelemetry-api>=1.29,<2.0
+opentelemetry-instrumentation-fastapi>=0.50b0
+opentelemetry-instrumentation-sqlalchemy>=0.50b0
+opentelemetry-exporter-otlp-proto-http>=1.29,<2.0
+
 # --- Tests ---
 # Kept in the main file rather than split into requirements-dev.txt: the
 # backend image deliberately keeps tests/ (seed.py reads its sample dataset

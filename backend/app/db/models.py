@@ -134,6 +134,17 @@ class Report(Base):
     )
     integrity_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # --- Cost accounting (Phase 9) ---------------------------------------
+    # Denormalised totals, rolled up from `llm_usage` when the report is
+    # stored. The per-call rows remain the source of truth; these exist so the
+    # report list and detail can show a cost without a GROUP BY per row.
+    #
+    # Null means "not measured", never zero — a report from n8n has no Python
+    # usage rows, and a provider that reports no tokens leaves nothing to sum.
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_cost_usd: Mapped[float | None] = mapped_column(Float)
+    generation_ms: Mapped[float | None] = mapped_column(Float)
+
     user: Mapped[Users] = relationship(back_populates="reports")
     document: Mapped[Document] = relationship(back_populates="reports")
     attack_types: Mapped[list[AttackType]] = relationship(
@@ -450,6 +461,59 @@ class Message(Base):
     )
 
     chat: Mapped[Chat] = relationship(back_populates="messages")
+
+
+class LlmUsage(Base):
+    """One LLM call: what it cost, how long it took, and whether it worked.
+
+    A row per *call*, not per section, which is what makes the retry rate
+    measurable at all — a section that needed its repair prompt produces two
+    rows with `attempt` 1 and 2, and the first one is the interesting one.
+
+    `report_id` is nullable because chat calls are LLM calls too and belong in
+    the same accounting; without them "what does this system cost to run" would
+    quietly exclude a whole feature. `section` names what the call was for —
+    a report section name, or `chat`.
+
+    **Every token and cost column is nullable, and null means "not measured".**
+    A provider that reports no usage, or a model with no configured price,
+    leaves them empty rather than zero. See `services/llm/pricing.py`.
+
+    `correlation_id` ties a call back to the request that caused it and to the
+    audit row for that request — the whole point of Phase 9's correlation id.
+    """
+
+    __tablename__ = "llm_usage"
+
+    usage_id: Mapped[uuid.UUID] = _pk()
+    report_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("reports.report_id", ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.user_id", ondelete="SET NULL"), index=True
+    )
+    # A report section name, or "chat".
+    section: Mapped[str] = mapped_column(String(60), nullable=False, index=True)
+    provider: Mapped[str] = mapped_column(String(40), nullable=False)
+    model: Mapped[str] = mapped_column(String(120), nullable=False)
+    # 1 for the first call, 2 for the repair retry. `attempt > 1` is the retry.
+    attempt: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    succeeded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[float] = mapped_column(Float, nullable=False)
+    cost_usd: Mapped[float | None] = mapped_column(Float)
+    correlation_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        # The dashboard reads "cost per day for this user" and "tokens by
+        # section"; both start from the owner and a date.
+        Index("ix_llm_usage_user_created", "user_id", "created_at"),
+    )
 
 
 class AuthAttempt(Base):

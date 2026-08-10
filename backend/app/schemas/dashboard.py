@@ -58,3 +58,62 @@ class AnomalyBucket(BaseModel):
     day: date
     findings: int = Field(description="Distinct anomalies recorded that day.")
     events: int = Field(description="Sum of each anomaly's occurrence count.")
+
+
+# --- Cost and latency (Phase 9) -------------------------------------------
+#
+# Every money and token field below is optional, and `None` means "not
+# measured" — a provider that reported no usage, or a model with no configured
+# price. It never means zero. The UI renders it as `—`, the same way a failed
+# aggregate does, because on this dashboard "I could not measure this" and
+# "this was free" must not look alike.
+
+
+class CostBucket(BaseModel):
+    """One day of LLM spend."""
+
+    day: date
+    cost_usd: float | None = None
+    total_tokens: int | None = None
+    calls: int
+
+
+class SectionTokens(BaseModel):
+    """Token spend for one report section, or for chat."""
+
+    section: str
+    prompt_tokens: int | None = None
+    completion_tokens: int | None = None
+    total_tokens: int | None = None
+    cost_usd: float | None = None
+    calls: int
+
+
+class LatencyBucket(BaseModel):
+    """Per-day generation latency.
+
+    p95 as well as the median, because a mean hides the tail and the tail is
+    what an analyst waiting on a report actually experiences.
+    """
+
+    day: date
+    p50_ms: float | None = None
+    p95_ms: float | None = None
+    reports: int
+
+
+class UsageSummary(BaseModel):
+    """Headline numbers for the cost panel.
+
+    `unpriced_calls` is deliberately surfaced rather than hidden: it is how
+    many calls could not be costed at all, and without it a total that excludes
+    them reads as complete when it is not.
+    """
+
+    total_cost_usd: float | None = None
+    total_tokens: int | None = None
+    calls: int
+    retries: int
+    retry_rate: float
+    unpriced_calls: int
+    cost_per_report_usd: float | None = None

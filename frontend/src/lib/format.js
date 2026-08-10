@@ -216,6 +216,47 @@ export function actionSubject(action) {
   return String(action ?? "").split(".")[0] || "—";
 }
 
+// --- Cost and duration ----------------------------------------------------
+
+/**
+ * Money, with enough precision to be useful at this scale.
+ *
+ * A single report costs fractions of a cent, so two decimal places would print
+ * `$0.00` for everything and make the whole feature look broken. Four are used
+ * below a cent and two above it, and the unit is always shown.
+ *
+ * **`null` renders as `—`, never `$0.00`.** A null means the provider reported
+ * no usage or the model has no configured price — "not measured", not "free".
+ * That distinction is enforced all the way down in `services/llm/pricing.py`
+ * and it would be undone here by a `?? 0`.
+ */
+export function formatUsd(value) {
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return "—";
+  const amount = Number(value);
+  if (amount === 0) return "$0";
+  if (Math.abs(amount) < 0.01) return `$${amount.toFixed(4)}`;
+  if (Math.abs(amount) < 1) return `$${amount.toFixed(3)}`;
+  return `$${amount.toFixed(2)}`;
+}
+
+/** Milliseconds as the largest sensible unit. Null is `—`, not `0ms`. */
+export function formatDuration(ms) {
+  if (ms === null || ms === undefined || Number.isNaN(Number(ms))) return "—";
+  const value = Number(ms);
+  if (value < 1000) return `${Math.round(value)}ms`;
+  if (value < 60_000) return `${(value / 1000).toFixed(1)}s`;
+  return `${Math.floor(value / 60_000)}m ${Math.round((value % 60_000) / 1000)}s`;
+}
+
+/** Token counts, abbreviated. Null is `—`. */
+export function formatTokens(value) {
+  if (value === null || value === undefined) return "—";
+  const number = Number(value);
+  if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(1)}M`;
+  if (number >= 1_000) return `${(number / 1_000).toFixed(1)}k`;
+  return String(number);
+}
+
 // --- Classification -------------------------------------------------------
 
 /** Mirrors the closed vocabulary in `app/schemas/report.py`, least to most restricted. */

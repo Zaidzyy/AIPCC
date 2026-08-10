@@ -26,6 +26,7 @@ from app.db import models
 from app.schemas.report import (
     AnomalyItem,
     AttackTypeItem,
+    LlmCallRecord,
     ReportDetail,
     ReportSections,
     RiskAssessmentItem,
@@ -69,6 +70,8 @@ def store_report(
     sections: ReportSections,
     errors: list[SectionError] | None = None,
     threat_intel: list[ThreatIntelCreate] | None = None,
+    usage: list[LlmCallRecord] | None = None,
+    generation_ms: float | None = None,
 ) -> models.Report:
     """Persist a generated report and all its sections. Commits.
 
@@ -85,16 +88,29 @@ def store_report(
     here; ownership of the *output* simply follows ownership of the *input*.
     """
     errors = errors or []
+    usage = usage or []
 
     document = db.get(models.Document, document_id)
+    owner_id = document.user_id if document else user_id
+
+    # Summed from the per-call rows, and **left null when nothing reported**
+    # rather than defaulting to zero. A report stored by n8n has no Python
+    # usage rows at all, and a provider that reports no tokens leaves nothing
+    # to add up; in both cases "not measured" is the truth and `0` would be a
+    # claim. Same rule as the dashboard's `—` and UNKNOWN integrity.
+    token_values = [r.total_tokens for r in usage if r.total_tokens is not None]
+    cost_values = [r.cost_usd for r in usage if r.cost_usd is not None]
 
     report = models.Report(
         report_name=report_name,
         document_id=document_id,
-        user_id=document.user_id if document else user_id,
+        user_id=owner_id,
         classification=classification,
         status=resolve_status(sections, errors),
         error_detail=_format_errors(errors),
+        total_tokens=sum(token_values) if token_values else None,
+        total_cost_usd=sum(cost_values) if cost_values else None,
+        generation_ms=generation_ms,
         # Seal the source document as it is right now. A missing or unreadable
         # file leaves this null and the report UNKNOWN rather than failing the
         # write — an unsealable report is still a report.
@@ -111,6 +127,18 @@ def store_report(
 
     for indicator in threat_intel or []:
         db.add(models.ThreatIntel(report_id=report.report_id, **indicator.model_dump()))
+
+    for record in usage:
+        # Attributed to the report's owner, not the caller — the same rule the
+        # report itself follows, so an n8n-generated report's spend appears on
+        # the analyst's dashboard rather than on the service account's.
+        db.add(
+            models.LlmUsage(
+                report_id=report.report_id,
+                user_id=owner_id,
+                **record.model_dump(),
+            )
+        )
 
     db.commit()
     db.refresh(report)

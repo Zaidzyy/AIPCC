@@ -11,10 +11,26 @@ from __future__ import annotations
 from functools import cache
 
 from app.core.config import settings
-from app.services.llm.base import LLMError, LLMProvider, extract_text
+from app.services.llm.base import (
+    LLMError,
+    LLMProvider,
+    LLMResult,
+    Usage,
+    extract_text,
+)
+from app.services.llm.pricing import cost_of, price_for
 from app.services.llm.providers import PROVIDERS
 
-__all__ = ["LLMError", "LLMProvider", "extract_text", "get_llm_provider"]
+__all__ = [
+    "LLMError",
+    "LLMProvider",
+    "LLMResult",
+    "Usage",
+    "cost_of",
+    "extract_text",
+    "get_llm_provider",
+    "price_for",
+]
 
 
 @cache
