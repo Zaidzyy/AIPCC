@@ -32,7 +32,7 @@
             {
               "id": "ae4f2dcc-2ac6-4319-83e8-3a77b4d17e5f",
               "name": "logs_text",
-              "value": "=={{ $json.logs_text }}",
+              "value": "={{ ($json.content || '').slice(0, 4000) }}",
               "type": "string"
             },
             {
@@ -63,7 +63,7 @@
     {
       "parameters": {
         "promptType": "define",
-        "text": "=You are a cybersecurity reporting engine acting as a senior SOC analyst.\n\nGenerate a professional, SOC-ready security incident report aligned with enterprise SOC documentation standards, using ONLY the inputs provided below.\nEnsure analysis depth matches the severity level.\n\nInputs:\n\nTitle: {{ $json.title }}\nVisibility: {{ $json.visibility }}\nReport Type: {{ $json.report_type }}\nAttack Type: {{ $json.attack_type }}\nAffected Asset: {{ $json.affected_asset }}\nSeverity: {{ $json.severity }}\nRequested Analysis Options: {{ $json.ai_options }}\n\nRaw Security Logs:\n{{ $json.logs_text }}\n\nThreat Intelligence Enrichment:\n\nAbuse Confidence Score: {{ $json.ip_reputation_score }}\n\nRisk Level: {{ $json.ti_risk_level }}\n\nCountry: {{ $json.ip_country }}\n\nUsage Type: {{ $json.ip_usage_type }}\n\nDetected IPs: {{ $json.extracted_indicators.ip_addresses }}\n\nThreat Intelligence Escalation Logic:\n\nIf Abuse Confidence Score >= 80:\n\nExplicitly classify infrastructure as confirmed malicious\n\nIf Abuse Confidence Score >= 80 AND provided severity is LOW or MEDIUM, set severity to HIGH\n\nIf provided severity is HIGH or CRITICAL, keep it unchanged\n\nReflect this in risk_explanation section\n\nSTRICT RULES:\n\nYou MUST respond in valid JSON only\n\nDo NOT include markdown\n\nDo NOT include explanations outside JSON\n\nDo NOT add or remove fields\n\nDo NOT rename fields\n\nDo NOT change structure\n\nFill all fields meaningfully\n\nThe JSON must strictly follow the schema\n\nNo duplicate keys are allowed\n\n\"sections\" object must contain exactly 5 keys\n\n\"attacks\" must ALWAYS be present\n\n\"vulnerability\" must ALWAYS be present\n\n\"detected_anomalies\" must ALWAYS be present\n\n\"timeline\" must ALWAYS be present\n\n\"general_risk_assessment\" must ALWAYS be present\n\nIf no attack details are available, return \"attacks\": []\n\nIf no vulnerabilities are observed, return \"vulnerability\": []\n\nIf no anomalies are detected, return \"detected_anomalies\": []\n\nIf no timeline reconstruction possible, return \"timeline\": []\n\nIf no enterprise risk modeling required, return \"general_risk_assessment\": []\n\nconfidence_score must be a number between 0 and 1\n\nTimeline must be chronologically ordered if timestamps exist\n\nDo not fabricate CVE IDs unless exploitation is clearly evidenced\n\nIf any input field is undefined, null, or empty, return it exactly as received (do not invent values)\n\nDo not override provided values except for severity escalation rule above\n\nYou may infer MITRE ATT&CK techniques only if supported by log evidence\n\nIf unsure about MITRE mapping, leave technique fields empty\n\nDo not fabricate or assume missing inputs\n\nOutput Structure (Return EXACTLY This):\n\n{\n\"title\": \"\",\n\"visibility\": \"\",\n\"report_type\": \"\",\n\"attack_type\": \"\",\n\"affected_asset\": \"\",\n\"severity\": \"\",\n\n\"attacks\": [\n{\n\"attack_name\": \"\",\n\"attack_mitre_technique_id\": \"\",\n\"attack_mitre_technique_name\": \"\",\n\"attack_description\": \"\",\n\"risk_name\": \"\",\n\"risk_level\": \"\",\n\"confidence_score\": 0.0\n}\n],\n\n\"vulnerability\": [\n{\n\"vulnerability_name\": \"\",\n\"description\": \"\",\n\"CVE_ID\": \"\",\n\"CVE_Description\": \"\",\n\"CWE_ID\": \"\",\n\"CWE_Description\": \"\",\n\"severity\": \"\"\n}\n],\n\n\"detected_anomalies\": [\n{\n\"anomaly_id\": \"\",\n\"description\": \"\",\n\"user_name\": \"\",\n\"source_ip\": \"\",\n\"destination_ip\": \"\",\n\"protocol\": \"\",\n\"counted\": 0,\n\"first_occurrence\": \"\",\n\"last_occurrence\": \"\"\n}\n],\n\n\"timeline\": [\n{\n\"event_name\": \"\",\n\"timestamp\": \"\",\n\"entity\": \"\",\n\"duration\": \"\"\n}\n],\n\n\"general_risk_assessment\": [\n{\n\"risk_name\": \"\",\n\"risk_description\": \"\",\n\"risk_level\": \"\",\n\"impact\": \"\",\n\"likelihood\": \"\",\n\"mitigation\": \"\"\n}\n],\n\n\"sections\": {\n\"executive_summary\": \"\",\n\"risk_explanation\": \"\",\n\"anomaly_analysis\": \"\",\n\"mitigation_recommendations\": \"\",\n\"execution_summary\": \"\"\n},\n\n\"created_by\": \"SOC-AI\",\n\"created_at\": \"\"\n}",
+        "text": "=You are a cybersecurity reporting engine acting as a senior SOC analyst.\n\nGenerate a professional, SOC-ready security incident report aligned with enterprise SOC documentation standards, using ONLY the inputs provided below.\nEnsure analysis depth matches the severity level.\n\nInputs:\n\nTitle: {{ $json.title }}\nVisibility: {{ $json.visibility }}\nReport Type: {{ $json.report_type }}\nAttack Type: {{ $json.attack_type }}\nAffected Asset: {{ $json.affected_asset }}\nSeverity: {{ $json.severity }}\nRequested Analysis Options: {{ $json.ai_options }}\n\nRaw Security Logs:\n{{ $json.logs_text }}\n\nThreat Intelligence Enrichment:\n\nAbuse Confidence Score: {{ $json.ip_reputation_score }}\n\nRisk Level: {{ $json.ti_risk_level }}\n\nCountry: {{ $json.ip_country }}\n\nUsage Type: {{ $json.ip_usage_type }}\n\nDetected IPs: {{ $json.extracted_indicators.ip_addresses }}\n\nThreat Intelligence Escalation Logic:\n\nIf Abuse Confidence Score >= 80:\n\nExplicitly classify infrastructure as confirmed malicious\n\nIf Abuse Confidence Score >= 80 AND provided severity is LOW or MEDIUM, set severity to HIGH\n\nIf provided severity is HIGH or CRITICAL, keep it unchanged\n\nReflect this in risk_explanation section\n\nSTRICT RULES:\n\nYou MUST respond in valid JSON only\n\nDo NOT include markdown\n\nDo NOT include explanations outside JSON\n\nDo NOT add or remove fields\n\nDo NOT rename fields\n\nDo NOT change structure\n\nFill all fields meaningfully\n\nThe JSON must strictly follow the schema\n\nNo duplicate keys are allowed\n\n\"sections\" object must contain exactly 5 keys\n\n\"attacks\" must ALWAYS be present\n\n\"vulnerability\" must ALWAYS be present\n\n\"detected_anomalies\" must ALWAYS be present\n\n\"timeline\" must ALWAYS be present\n\n\"general_risk_assessment\" must ALWAYS be present\n\nIf no attack details are available, return \"attacks\": []\n\nIf no vulnerabilities are observed, return \"vulnerability\": []\n\nIf no anomalies are detected, return \"detected_anomalies\": []\n\nIf no timeline reconstruction possible, return \"timeline\": []\n\nIf no enterprise risk modeling required, return \"general_risk_assessment\": []\n\nconfidence_score must be a number between 0 and 1\n\nTimeline must be chronologically ordered if timestamps exist\n\nDo not fabricate CVE IDs unless exploitation is clearly evidenced\n\nIf any input field is undefined, null, or empty, return it exactly as received (do not invent values)\n\nDo not override provided values except for severity escalation rule above\n\nYou may infer MITRE ATT&CK techniques only if supported by log evidence\n\nIf unsure about MITRE mapping, leave technique fields empty\n\nDo not fabricate or assume missing inputs\n\nOutput Structure (Return EXACTLY This):\n\n{\n\"title\": \"\",\n\"visibility\": \"\",\n\"report_type\": \"\",\n\"attack_type\": \"\",\n\"affected_asset\": \"\",\n\"severity\": \"\",\n\n\"attacks\": [\n{\n\"attack_name\": \"\",\n\"attack_mitre_technique_id\": \"\",\n\"attack_mitre_technique_name\": \"\",\n\"attack_description\": \"\",\n\"risk_name\": \"\",\n\"risk_level\": \"\",\n\"confidence_score\": 0.0\n}\n],\n\n\"vulnerability\": [\n{\n\"vulnerability_name\": \"\",\n\"description\": \"\",\n\"CVE_ID\": \"\",\n\"CVE_Description\": \"\",\n\"CWE_ID\": \"\",\n\"CWE_Description\": \"\",\n\"severity\": \"\"\n}\n],\n\n\"detected_anomalies\": [\n{\n\"anomaly_id\": \"\",\n\"description\": \"\",\n\"user_name\": \"\",\n\"source_ip\": \"\",\n\"destination_ip\": \"\",\n\"protocol\": \"\",\n\"counted\": 0,\n\"first_occurrence\": \"\",\n\"last_occurrence\": \"\"\n}\n],\n\n\"timeline\": [\n{\n\"event_name\": \"\",\n\"timestamp\": \"\",\n\"entity\": \"\",\n\"duration\": \"\"\n}\n],\n\n\"general_risk_assessment\": [\n{\n\"risk_name\": \"\",\n\"risk_description\": \"\",\n\"risk_level\": \"\",\n\"impact\": \"\",\n\"likelihood\": \"\",\n\"mitigation\": \"\"\n}\n],\n\n\"sections\": {\n\"executive_summary\": \"\",\n\"risk_explanation\": \"\",\n\"anomaly_analysis\": \"\",\n\"mitigation_recommendations\": \"\",\n\"execution_summary\": \"\"\n},\n\n\"created_by\": \"SOC-AI\",\n\"created_at\": \"\"\n}\n\nOUTPUT SIZE LIMITS (these are hard limits, not suggestions):\nReturn AT MOST 3 items in \"attacks\"\nReturn AT MOST 3 items in \"vulnerability\"\nReturn AT MOST 5 items in \"detected_anomalies\" — group similar rows into a single anomaly and use \"counted\" for how many times it occurred. Do NOT emit one entry per log line.\nReturn AT MOST 5 items in \"timeline\" — the most significant events only\nReturn AT MOST 3 items in \"general_risk_assessment\"\nDo NOT include comments of any kind in the JSON. No // and no /* */. A comment makes the response invalid and it will be discarded.\n",
         "hasOutputParser": true,
         "options": {}
       },
@@ -78,8 +78,10 @@
     },
     {
       "parameters": {
-        "model": "llama-3.3-70b-versatile",
-        "options": {}
+        "model": "llama-3.1-8b-instant",
+        "options": {
+          "maxTokensToSample": 3000
+        }
       },
       "type": "@n8n/n8n-nodes-langchain.lmChatGroq",
       "typeVersion": 1,
@@ -105,7 +107,7 @@
         "sendBody": true,
         "options": {},
         "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify({\n  document_id: $('Normalize Input Data').item.json.document_id,\n  report_name: 'Orchestrator — ' + $('Normalize Input Data').item.json.document_name,\n  classification: $('Normalize Input Data').item.json.visibility || 'Internal',\n  sections: {\n    attack_types: $json.parsed_report?.attack_types ?? [],\n    general_risk_assessment: $json.parsed_report?.general_risk_assessment ?? [],\n    vulnerabilities: $json.parsed_report?.vulnerabilities ?? [],\n    anomalies: $json.parsed_report?.anomalies ?? [],\n    timeline: $json.parsed_report?.timeline ?? []\n  },\n  threat_intel: ($('Risk Scoring Engine').item.json.classified_iocs ?? []).map(ioc => {\n    const looked_up = ioc.value === $('Risk Scoring Engine').item.json.data?.ipAddress;\n    return {\n      indicator: ioc.value,\n      indicator_type: ioc.type === 'IP Address' ? 'ip'\n        : ioc.type === 'File Hash' ? 'hash' : 'domain',\n      category: ioc.category,\n      source: looked_up ? 'abuseipdb' : 'n8n',\n      reputation_score: looked_up\n        ? $('Risk Scoring Engine').item.json.ip_reputation_score : null,\n      risk_level: looked_up\n        ? $('Risk Scoring Engine').item.json.ti_risk_level : null,\n      country: looked_up ? $('Risk Scoring Engine').item.json.ip_country : null,\n      usage_type: looked_up ? $('Risk Scoring Engine').item.json.ip_usage_type : null\n    };\n  })\n}) }}"
+        "jsonBody": "={{ JSON.stringify({\n  document_id: $('Normalize Input Data').item.json.document_id,\n  report_name: 'Orchestrator — ' + $('Normalize Input Data').item.json.document_name,\n  classification: $('Normalize Input Data').item.json.visibility || 'Internal',\n  sections: {\n    attack_types: $json.parsed_report?.attack_types ?? $json.parsed_report?.attacks ?? [],\n    general_risk_assessment: $json.parsed_report?.general_risk_assessment ?? [],\n    vulnerabilities: $json.parsed_report?.vulnerabilities ?? $json.parsed_report?.vulnerability ?? [],\n    anomalies: $json.parsed_report?.anomalies ?? $json.parsed_report?.detected_anomalies ?? [],\n    timeline: $json.parsed_report?.timeline ?? []\n  },\n  threat_intel: ($('Risk Scoring Engine').item.json.classified_iocs ?? []).map(ioc => {\n    const looked_up = ioc.value === $('Risk Scoring Engine').item.json.data?.ipAddress;\n    return {\n      indicator: ioc.value,\n      indicator_type: ioc.type === 'IP Address' ? 'ip'\n        : ioc.type === 'File Hash' ? 'hash' : 'domain',\n      category: ioc.category,\n      source: looked_up ? 'abuseipdb' : 'n8n',\n      reputation_score: looked_up\n        ? $('Risk Scoring Engine').item.json.ip_reputation_score : null,\n      risk_level: looked_up\n        ? $('Risk Scoring Engine').item.json.ti_risk_level : null,\n      country: looked_up ? $('Risk Scoring Engine').item.json.ip_country : null,\n      usage_type: looked_up ? $('Risk Scoring Engine').item.json.ip_usage_type : null\n    };\n  })\n}) }}"
       },
       "type": "n8n-nodes-base.httpRequest",
       "typeVersion": 4.3,
@@ -115,40 +117,6 @@
       ],
       "id": "78ea5d98-3f11-445a-9393-cff803cbf3cd",
       "name": "Save AI Analysis",
-      "credentials": {
-        "httpHeaderAuth": {
-          "id": "aipcc-api-key",
-          "name": "AIPCC API Key"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "method": "POST",
-        "url": "http://host.docker.internal:8000/upload_file",
-        "authentication": "genericCredentialType",
-        "genericAuthType": "httpHeaderAuth",
-        "sendBody": true,
-        "contentType": "multipart-form-data",
-        "bodyParameters": {
-          "parameters": [
-            {
-              "parameterType": "formBinaryData",
-              "name": "upload_file",
-              "inputDataFieldName": "file"
-            }
-          ]
-        },
-        "options": {}
-      },
-      "type": "n8n-nodes-base.httpRequest",
-      "typeVersion": 4.3,
-      "position": [
-        3376,
-        960
-      ],
-      "id": "b7525235-5ce7-449f-8871-ee93afd6fe6f",
-      "name": "Upload Report File",
       "credentials": {
         "httpHeaderAuth": {
           "id": "aipcc-api-key",
@@ -291,19 +259,6 @@
     },
     {
       "parameters": {
-        "jsCode": "const {\n  Document,\n  Packer,\n  Paragraph,\n  HeadingLevel,\n  Table,\n  TableRow,\n  TableCell,\n  AlignmentType,\n  ImageRun\n} = require(\"docx\");\n\nconst fs = require(\"fs\");\n\nconst data = $input.first().json;\nconst report = data.parsed_report || {};\n\n// ==========================\n// SAFE EXTRACTION\n// ==========================\n\nconst title = report.title || \"Security Incident Report\";\nconst severity = report.severity || \"UNKNOWN\";\nconst createdAt = report.created_at || \"\";\nconst createdBy = report.created_by || \"SOC-AI\";\n\nconst sections = report.sections || {};\nconst attacks = report.attacks || [];\n\nconst executive = sections.executive_summary || \"\";\nconst risk = sections.risk_explanation || \"\";\nconst anomaly = sections.anomaly_analysis || \"\";\nconst mitigation = sections.mitigation_recommendations || \"\";\nconst execution = sections.execution_summary || \"\";\n\nconst attack = attacks[0] || {};\n\nconst mitreId = attack.attack_mitre_technique_id || \"-\";\nconst mitreName = attack.attack_mitre_technique_name || \"-\";\nconst confidence = Math.round((attack.confidence_score || 0) * 100);\n\n// ==========================\n// VISUAL BAR FUNCTION\n// ==========================\n\nfunction bar(score) {\n  const filled = Math.floor(score / 5);\n  return \"█\".repeat(filled) + \"░\".repeat(20 - filled);\n}\n\n// ==========================\n// LOAD LOGO (OPTIONAL)\n// ==========================\n\nlet logo;\ntry {\n  logo = fs.readFileSync(\"/files/adnoc_logo.jpeg\");\n} catch {}\n\n// ==========================\n// MITRE TABLE (DYNAMIC)\n// ==========================\n\nconst mitreTable = new Table({\n  rows: [\n    new TableRow({\n      children: [\n        new TableCell({ children: [new Paragraph(\"Technique ID\")] }),\n        new TableCell({ children: [new Paragraph(\"Technique Name\")] }),\n        new TableCell({ children: [new Paragraph(\"Confidence (%)\")] })\n      ]\n    }),\n    new TableRow({\n      children: [\n        new TableCell({ children: [new Paragraph(mitreId)] }),\n        new TableCell({ children: [new Paragraph(mitreName)] }),\n        new TableCell({ children: [new Paragraph(confidence.toString())] })\n      ]\n    })\n  ]\n});\n\n// ==========================\n// DOCUMENT CHILDREN\n// ==========================\n\nconst children = [];\n\n// Logo\nif (logo) {\n  children.push(\n    new Paragraph({\n      children: [\n        new ImageRun({\n          data: logo,\n          transformation: { width: 200, height: 100 }\n        })\n      ],\n      alignment: AlignmentType.CENTER\n    })\n  );\n}\n\n// Title Section\nchildren.push(\n  new Paragraph({\n    text: \"AI SECURITY REPORT\",\n    heading: HeadingLevel.HEADING_1,\n    alignment: AlignmentType.CENTER\n  }),\n  new Paragraph(\"\"),\n  new Paragraph(`Incident Title: ${title}`),\n  new Paragraph(`Severity: ${severity}`),\n  new Paragraph(\"\"),\n  new Paragraph(`Threat Confidence: ${confidence}%`),\n  new Paragraph(bar(confidence)),\n  new Paragraph(\"\")\n);\n\n// Section Builder\nfunction section(title, content) {\n  children.push(\n    new Paragraph({\n      text: title,\n      heading: HeadingLevel.HEADING_2\n    }),\n    new Paragraph(content || \"No data available\"),\n    new Paragraph(\"\")\n  );\n}\n\n// Sections (FROM AI JSON — no parsing)\nsection(\"EXECUTIVE SUMMARY\", executive);\nsection(\"RISK EXPLANATION\", risk);\nsection(\"ANOMALY ANALYSIS\", anomaly);\nsection(\"MITIGATION RECOMMENDATIONS\", mitigation);\nsection(\"EXECUTION SUMMARY\", execution);\n\n// MITRE Section\nchildren.push(\n  new Paragraph({\n    text: \"MITRE ATT&CK Mapping\",\n    heading: HeadingLevel.HEADING_2\n  }),\n  mitreTable,\n  new Paragraph(\"\")\n);\n\n// Footer\nchildren.push(\n  new Paragraph(`Report Generated By: ${createdBy}`),\n  new Paragraph(`Date & Time: ${createdAt}`)\n);\n\n// ==========================\n// BUILD DOCUMENT\n// ==========================\n\nconst doc = new Document({\n  sections: [\n    {\n      children\n    }\n  ]\n});\n\nconst buffer = await Packer.toBuffer(doc);\n\nconst binary = await this.helpers.prepareBinaryData(\n  buffer,\n  `ADNOC_Security_Report_${Date.now()}.docx`,\n  \"application/vnd.openxmlformats-officedocument.wordprocessingml.document\"\n);\n\nreturn [\n  {\n    json: {},\n    binary: {\n      file: binary\n    }\n  }\n];"
-      },
-      "type": "n8n-nodes-base.code",
-      "typeVersion": 2,
-      "position": [
-        3200,
-        720
-      ],
-      "id": "479cd0c3-7c86-4270-aef2-20140b4ef28e",
-      "name": "Generate Professional DOCX Report"
-    },
-    {
-      "parameters": {
         "jsCode": "const data = $input.first().json;\n\n// Initialize score\nlet score = 0;\n\n// 1. AbuseIPDB score contribution (0–40)\nconst abuseScore = data.ip_reputation_score || 0;\nscore += Math.min(abuseScore * 0.4, 40);\n\n// 2. Indicator count contribution (0–25)\nconst ipCount = data.extracted_indicators?.ip_addresses?.length || 0;\nconst hashCount = data.extracted_indicators?.sha256_hashes?.length || 0;\n\nconst indicatorScore = (ipCount * 5) + (hashCount * 8);\nscore += Math.min(indicatorScore, 25);\n\n// 3. Severity contribution (0–20)\nconst severity = (data.severity || \"\").toLowerCase();\n\nif (severity === \"critical\") score += 20;\nelse if (severity === \"high\") score += 15;\nelse if (severity === \"medium\") score += 10;\nelse if (severity === \"low\") score += 5;\n\n// 4. Threat intelligence risk level (0–15)\nconst tiRisk = (data.ti_risk_level || \"\").toLowerCase();\n\nif (tiRisk === \"critical\") score += 15;\nelse if (tiRisk === \"high\") score += 15;\nelse if (tiRisk === \"medium\") score += 10;\nelse if (tiRisk === \"low\") score += 5;\n\n// Clamp score\nscore = Math.min(Math.round(score), 100);\n\n// Determine risk level\nlet riskLevel = \"LOW\";\n\nif (score >= 75) riskLevel = \"CRITICAL\";\nelse if (score >= 50) riskLevel = \"HIGH\";\nelse if (score >= 25) riskLevel = \"MEDIUM\";\n\n// ✅ Preserve ALL previous fields properly\nreturn [\n  {\n    json: {\n      ...data,\n      risk_score: score,\n      risk_level: riskLevel,\n    }\n  }\n];"
       },
       "type": "n8n-nodes-base.code",
@@ -335,7 +290,7 @@
             {
               "id": "4c4d0ff6-7741-4e7c-a4d7-1d6082d37042",
               "name": "parsed_report",
-              "value": "={{ JSON.parse(\n    $json.output\n      .replace(/```json/g, '')\n      .replace(/```/g, '')\n      .trim()\n) }}",
+              "value": "={{ (() => {\n  let t = ($json.output || '')\n    .replace(/<think>[\\s\\S]*?<\\/think>/gi, '')\n    .replace(/```json/gi, '')\n    .replace(/```/g, '');\n  const s = t.indexOf('{'), e = t.lastIndexOf('}');\n  if (s === -1 || e <= s) return null;\n  t = t.slice(s, e + 1)\n    .replace(/\\/\\*[\\s\\S]*?\\*\\//g, '')\n    .replace(/(^|[^:])\\/\\/[^\\n\\r]*/g, '$1')\n    .replace(/,(\\s*[}\\]])/g, '$1');\n  try { return JSON.parse(t); } catch (err) { return null; }\n})() }}",
               "type": "object"
             }
           ]
@@ -519,29 +474,7 @@
         ]
       ]
     },
-    "Generate Professional DOCX Report": {
-      "main": [
-        [
-          {
-            "node": "Upload Report File",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "Edit Fields": {
-      "main": [
-        [
-          {
-            "node": "Generate Professional DOCX Report",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Upload Report File": {
       "main": [
         [
           {
