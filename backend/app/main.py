@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.routers import (
     alerts,
     api_keys,
+    attack,
     audit,
     auth,
     chat,
@@ -82,6 +83,7 @@ def create_app() -> FastAPI:
     app.include_router(api_keys.router)
     app.include_router(audit.router)
     app.include_router(evaluation.router)
+    app.include_router(attack.router)
 
     # Last, because instrumenting FastAPI wraps the finished middleware stack.
     # No-op unless OTEL_ENABLED — see `core/tracing.py` on why it is off by

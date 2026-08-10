@@ -7,6 +7,7 @@
  */
 
 export * as alertsApi from "./alerts";
+export * as attackApi from "./attack";
 export * as auditApi from "./audit";
 export * as authApi from "./auth";
 export * as chatApi from "./chat";

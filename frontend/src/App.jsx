@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from "react-router-dom";
 import { IntroSequence } from "@/components/common/IntroSequence";
 import { AppShell } from "@/components/layout/AppShell";
 import { Alerts } from "@/pages/Alerts";
+import { AttackMatrix } from "@/pages/AttackMatrix";
 import { Audit } from "@/pages/Audit";
 import { Chat } from "@/pages/Chat";
 import { Dashboard } from "@/pages/Dashboard";
@@ -45,6 +46,7 @@ export default function App() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/reports/:reportId" element={<ReportDetail />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/attack" element={<AttackMatrix />} />
             <Route path="/evaluation" element={<Evaluation />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
