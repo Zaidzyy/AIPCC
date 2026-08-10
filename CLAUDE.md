@@ -581,6 +581,12 @@ absent from its final tree — `git show` recovers it as reference material.
   idempotent and prints "already present" on every boot after the first. The alternative is a
   reviewer running `docker compose up`, reaching a login form and having no credentials — an app
   that is running and unusable.
+- **`--ingest` had to *become* idempotent to allow that.** As a hand-run script it re-embedded
+  unconditionally; on a startup command that meant another full copy of the same 195 chunks per
+  restart, quietly degrading retrieval for as long as nobody looked. The guard asks Chroma
+  (`count_chunks(document_id)`) rather than inferring from "did we just create the document row" —
+  the database and the vector store are separate volumes and go out of step, so a wiped chroma
+  volume with the DB intact must still re-embed.
 - **The embedding model is baked into the backend image.** Otherwise the first ingest downloads
   MiniLM from Hugging Face *after* the build, so `docker compose up` keeps a network dependency and
   fails behind a rate limit with a stack trace instead of a report. ~90 MB on a 3.3 GB image.
