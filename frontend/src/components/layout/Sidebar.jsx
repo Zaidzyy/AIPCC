@@ -1,6 +1,7 @@
 import {
   FileText,
   LayoutDashboard,
+  FlaskConical,
   MessageSquare,
   ScrollText,
   Settings,
@@ -28,6 +29,7 @@ const GROUPS = [
       { to: "/reports", label: "Reports", icon: FileText },
       { to: "/alerts", label: "Alerts", icon: ShieldAlert },
       { to: "/chat", label: "Chat", icon: MessageSquare },
+      { to: "/evaluation", label: "Evaluation", icon: FlaskConical },
     ],
   },
   {

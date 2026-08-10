@@ -122,6 +122,20 @@ class Settings(BaseSettings):
         }
     )
 
+    # --- Evaluation gate (Phase 11) ----------------------------------------
+    # The thresholds `python -m app.eval.run --gate` enforces, and the reason
+    # they are configuration: a quality bar is a project decision that changes
+    # as the system improves, and one buried in code is one nobody raises.
+    #
+    # Deliberately not zero and not one. A gate set to perfection fails on the
+    # first honest run and gets deleted; these are set where the recorded
+    # baseline sits, so a *regression* trips them and normal variation does
+    # not. Raise them as the numbers improve — that is the point of having them
+    # here rather than in a constant.
+    eval_max_hallucination_rate: float = 0.10
+    eval_min_grounding_rate: float = 0.80
+    eval_min_section_success_rate: float = 0.80
+
     # --- RAG / vector store ------------------------------------------------
     chroma_dir: Path = BACKEND_DIR / "chroma_langchain_db"
     chroma_collection: str = "AIPCC_db"

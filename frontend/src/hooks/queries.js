@@ -6,6 +6,7 @@ import {
   chatApi,
   dashboardApi,
   documentsApi,
+  evaluationApi,
   reportsApi,
   sharesApi,
   usersApi,
@@ -44,6 +45,7 @@ export const keys = {
   audit: ["audit"],
   auditList: (params) => ["audit", params],
   auditFilters: ["audit", "filters"],
+  evaluation: ["evaluation", "latest"],
   shares: (reportId) => ["reports", reportId, "shares"],
   // The public read is keyed on the token and lives outside every other key
   // space: nothing an authenticated page invalidates should touch it.
@@ -100,6 +102,19 @@ export function useAuditFilters() {
     queryKey: keys.auditFilters,
     queryFn: auditApi.filters,
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// --- Evaluation -----------------------------------------------------------
+
+export function useEvaluation() {
+  return useQuery({
+    queryKey: keys.evaluation,
+    queryFn: evaluationApi.latest,
+    // A committed file that changes when someone runs the harness and commits
+    // the result — not something a page refresh can move.
+    staleTime: 10 * 60 * 1000,
+    retry: false,
   });
 }
 

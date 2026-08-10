@@ -91,6 +91,57 @@ jobs:
       - name: Tests
         run: pytest -q
 
+  eval:
+    name: Quality gate — hallucination and grounding
+    runs-on: ubuntu-latest
+
+    # No Postgres service, and no `DATABASE_URL`. The eval harness chunks a
+    # committed log file and replays recorded provider responses, so it touches
+    # no database, no vector store, no embedding model and no network. A
+    # quality gate with infrastructure behind it is a quality gate that fails
+    # for reasons unrelated to quality, and one that goes red on a bad day is
+    # one that gets marked `continue-on-error` within a week.
+    env:
+      ENVIRONMENT: ci
+      JWT_SECRET: ci-only-signing-key-long-enough-for-hs256-rfc7518
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install --index-url https://download.pytorch.org/whl/cpu torch
+          pip install -r requirements.txt
+
+      - name: Evaluate against the golden dataset
+        # Replayed, never live: a gate that calls a model on every push needs a
+        # secret, costs money per push, and is non-deterministic by
+        # construction. `--gate` exits non-zero when the hallucination rate
+        # rises above, or grounding falls below, the thresholds in config.py.
+        #
+        # What this proves is the harness and the thresholds, not the current
+        # model — see backend/EVAL.md. `python -m app.eval.run --live` is the
+        # only mode whose numbers describe a model.
+        run: python -m app.eval.run --gate
+
+      - name: Publish the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-result
+          path: backend/app/eval/results/latest.json
+
   frontend:
     name: Frontend — lint, tests and build
     runs-on: ubuntu-latest

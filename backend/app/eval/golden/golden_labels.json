@@ -1,0 +1,106 @@
+{
+ "_about": {
+  "log": "golden_log.csv",
+  "authored": "2026-08-10",
+  "authored_by": "hand-labelled, not model-generated",
+  "scenario": "One intrusion, start to finish: an SSH password guessing run against a single account, a successful login, bulk reads of finance and HR files, three large uploads to an external host, a PowerShell download-and-run, registry and service persistence, failed then successful lateral movement over SMB, a fixed-interval C2 beacon, and finally the Security event log being cleared. Interleaved with a handful of ordinary user actions that must NOT be reported as attacks.",
+  "what_this_covers": "Recall and precision against a scenario a competent analyst would agree on, and nothing else. It is one synthetic log of 35 rows with a deliberately unambiguous story — it says nothing about performance on noisy production data, on formats other than CSV, or on attacks not represented here. Small on purpose: every label has to be defensible by reading the log, and a set nobody can check by hand is a set nobody will maintain.",
+  "labelling_rule": "A finding matches a label if any of the label's `match_any` strings appears in the finding's name or description, case-insensitively. Deliberately generous on wording and strict on substance: the model is being measured on whether it saw the event, not on whether it phrased it the way the labeller did.",
+  "mitre_note": "`mitre` is the technique the labeller considers correct, taken from the vendored ATT&CK catalogue. It is reported as an accuracy figure, not enforced: several of these events map to more than one defensible technique, and grading a model wrong for choosing the other one would measure agreement with the labeller rather than correctness."
+ },
+
+ "expected_attacks": [
+  {
+   "id": "brute_force",
+   "label": "SSH password guessing against jmorris",
+   "rows": [0, 10],
+   "match_any": ["brute", "password guess", "credential guess", "failed login", "failed authentication", "auth_failure", "repeated login"],
+   "mitre": "T1110",
+   "why": "Eleven consecutive auth_failure rows from 203.0.113.44 for one account, two seconds apart, followed by a success."
+  },
+  {
+   "id": "exfiltration",
+   "label": "Bulk upload of finance and HR files to an external host",
+   "rows": [15, 17],
+   "match_any": ["exfil", "data transfer", "upload", "data theft", "outbound transfer"],
+   "mitre": "T1041",
+   "why": "8.4 MB posted to storage.example-cdn.net minutes after reading payroll, forecast and salary files."
+  },
+  {
+   "id": "persistence",
+   "label": "Run-key and service persistence for C:\\Windows\\Temp\\svc.exe",
+   "rows": [20, 21],
+   "match_any": ["persistence", "registry run", "run key", "autostart", "service install", "svcupdater"],
+   "mitre": "T1547",
+   "why": "A Run key and a service both pointing at a binary dropped into Temp minutes earlier."
+  },
+  {
+   "id": "powershell_execution",
+   "label": "Encoded PowerShell downloading and running a payload",
+   "rows": [18, 19],
+   "match_any": ["powershell", "encoded command", "script execution", "living off the land", "downloaded payload"],
+   "mitre": "T1059.001",
+   "why": "powershell.exe -enc followed by a payload written to C:\\Windows\\Temp\\svc.exe."
+  },
+  {
+   "id": "lateral_movement",
+   "label": "SMB admin$ sweep across three hosts",
+   "rows": [22, 24],
+   "match_any": ["lateral", "smb", "admin$", "remote share", "pivot"],
+   "mitre": "T1021.002",
+   "why": "Two access-denied attempts on dc01 and dc02 followed by a successful connection to ws33."
+  },
+  {
+   "id": "c2_beacon",
+   "label": "Fixed-interval beacon to 192.0.2.200",
+   "rows": [25, 29],
+   "match_any": ["beacon", "command and control", "c2", "callback", "periodic"],
+   "mitre": "T1071",
+   "why": "Four HTTPS beacons of identical size exactly sixty seconds apart, after a DNS lookup of a dynamic-DNS name."
+  },
+  {
+   "id": "log_clearing",
+   "label": "Windows Security event log cleared",
+   "rows": [34, 34],
+   "match_any": ["log clear", "cleared", "anti-forensic", "indicator removal", "event log"],
+   "mitre": "T1070.001",
+   "why": "The last action in the log, after everything above."
+  }
+ ],
+
+ "expected_anomalies": [
+  {
+   "id": "anomalous_account",
+   "label": "jmorris active at 01:00–04:00 from an external address",
+   "match_any": ["jmorris", "4471", "203.0.113.44", "off-hours", "unusual hour"],
+   "why": "Every other user in this log acts from the corporate range during working hours."
+  },
+  {
+   "id": "external_source",
+   "label": "203.0.113.44 as an external source of authentication",
+   "match_any": ["203.0.113.44", "external", "public ip", "outside"],
+   "why": "The only non-RFC1918 source of an authentication attempt."
+  }
+ ],
+
+ "must_not_report": [
+  {
+   "id": "rlee_benign",
+   "label": "rlee reading onboarding.pdf",
+   "match_any": ["rlee", "onboarding.pdf"],
+   "why": "One ordinary file read from the corporate range in working hours. Reporting it is a false positive, and a report that flags routine activity is a report an analyst stops reading."
+  },
+  {
+   "id": "tchen_benign",
+   "label": "tchen reading handbook.pdf",
+   "match_any": ["tchen", "handbook.pdf"],
+   "why": "As above."
+  },
+  {
+   "id": "dsingh_benign",
+   "label": "dsingh logging in and exporting a report",
+   "match_any": ["dsingh", "quarterly report", "handbook"],
+   "why": "A successful web console login and an export, from the corporate range, in working hours."
+  }
+ ]
+}

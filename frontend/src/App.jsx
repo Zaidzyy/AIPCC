@@ -6,6 +6,7 @@ import { Alerts } from "@/pages/Alerts";
 import { Audit } from "@/pages/Audit";
 import { Chat } from "@/pages/Chat";
 import { Dashboard } from "@/pages/Dashboard";
+import { Evaluation } from "@/pages/Evaluation";
 import { Generate } from "@/pages/Generate";
 import { Login } from "@/pages/Login";
 import { NotFound } from "@/pages/NotFound";
@@ -44,6 +45,7 @@ export default function App() {
             <Route path="/reports" element={<Reports />} />
             <Route path="/reports/:reportId" element={<ReportDetail />} />
             <Route path="/alerts" element={<Alerts />} />
+            <Route path="/evaluation" element={<Evaluation />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/profile" element={<Profile />} />
             <Route path="/settings" element={<Settings />} />
