@@ -1028,12 +1028,6 @@ section.
 
 ## Credits
 
-Rebuilt from [`ahmed2bassam/AIPCC`](https://github.com/ahmed2bassam/AIPCC), a
-university group project with 7 contributors. That prototype proved the RAG +
-structured-report concept; the RAG pipeline and the five section prompts were
-ported from it and are credited in [`PORTING.md`](PORTING.md). Everything else in
-this repository is a ground-up reimplementation.
-
 MITRE ATT&CK® and CWE™ are © The MITRE Corporation, used under their respective
 terms of use; the ATT&CK Navigator is Apache-2.0. Versions, source URLs, download
 checksums and attributions for every vendored file are recorded in
