@@ -26,6 +26,7 @@ import json
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ValidationError
@@ -288,19 +289,28 @@ class SectionOutcome:
     grounding: GroundingResult = field(default_factory=GroundingResult)
 
 
+# What retrieval looks like from the generator's point of view: a section spec
+# and a document id in, chunks out. Injectable so the evaluation harness can
+# feed a deterministic set from a committed log file — no Chroma, no embedding
+# model, no network — which is what makes the CI quality gate hermetic.
+Retriever = Callable[[SectionSpec, str], list[SourceChunk]]
+
+
 async def generate_section(
     spec: SectionSpec,
     document_id: str,
     provider: LLMProvider,
+    retriever: Retriever | None = None,
 ) -> SectionOutcome:
     """Generate one section: retrieve, prompt, parse, validate, retry once."""
     usage: list[LlmCallRecord] = []
+    retriever = retriever or retrieve_context
 
     with tracer.start_as_current_span("report.section") as span:
         span.set_attribute("section.name", spec.name)
 
         try:
-            chunks = await asyncio.to_thread(retrieve_context, spec, document_id)
+            chunks = await asyncio.to_thread(retriever, spec, document_id)
         except Exception as exc:
             logger.exception("retrieval failed for section %s", spec.name)
             return SectionOutcome(
@@ -458,6 +468,7 @@ def _summarize(exc: ValidationError, limit: int = 5) -> str:
 async def generate_report(
     document_id: str,
     provider: LLMProvider | None = None,
+    retriever: Retriever | None = None,
 ) -> ReportGenerationResult:
     """Generate every section concurrently.
 
@@ -476,7 +487,10 @@ async def generate_report(
         started = time.perf_counter()
 
         outcomes = await asyncio.gather(
-            *(generate_section(spec, document_id, provider) for spec in SECTION_SPECS),
+            *(
+                generate_section(spec, document_id, provider, retriever)
+                for spec in SECTION_SPECS
+            ),
             return_exceptions=True,
         )
 

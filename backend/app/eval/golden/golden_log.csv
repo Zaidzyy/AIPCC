@@ -1,0 +1,36 @@
+timestamp,source_ip,destination_ip,user_name,user_id,protocol,event,bytes,status,detail
+2026-03-02T01:04:11Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:13Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:15Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:17Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:19Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:21Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:23Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:25Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:27Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:29Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:31Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_failure,412,failed,invalid password for jmorris
+2026-03-02T01:04:33Z,203.0.113.44,10.20.0.15,jmorris,4471,SSH,auth_success,980,success,password accepted for jmorris
+2026-03-02T01:06:02Z,10.20.0.15,10.20.0.9,jmorris,4471,SMB,file_read,58221,success,read \\fileserver\finance\payroll_2026.xlsx
+2026-03-02T01:06:44Z,10.20.0.15,10.20.0.9,jmorris,4471,SMB,file_read,91044,success,read \\fileserver\finance\forecast_q2.xlsx
+2026-03-02T01:07:20Z,10.20.0.15,10.20.0.9,jmorris,4471,SMB,file_read,77310,success,read \\fileserver\hr\salaries.csv
+2026-03-02T01:09:58Z,10.20.0.15,198.51.100.77,jmorris,4471,HTTPS,upload,2411889,success,POST to storage.example-cdn.net 2.4MB
+2026-03-02T01:11:02Z,10.20.0.15,198.51.100.77,jmorris,4471,HTTPS,upload,3190447,success,POST to storage.example-cdn.net 3.1MB
+2026-03-02T01:12:40Z,10.20.0.15,198.51.100.77,jmorris,4471,HTTPS,upload,2884120,success,POST to storage.example-cdn.net 2.8MB
+2026-03-02T02:15:07Z,10.20.0.15,10.20.0.4,SYSTEM,0,LOCAL,process_start,0,success,powershell.exe -enc SQBFAFgAIAAoAE4AZQB3AC0ATwBiAGoAZQBjAHQA
+2026-03-02T02:15:09Z,10.20.0.15,10.20.0.4,SYSTEM,0,LOCAL,process_start,0,success,powershell.exe downloaded payload to C:\Windows\Temp\svc.exe
+2026-03-02T02:15:44Z,10.20.0.15,10.20.0.4,SYSTEM,0,LOCAL,registry_write,0,success,HKLM\Software\Microsoft\Windows\CurrentVersion\Run\svcupdater
+2026-03-02T02:16:03Z,10.20.0.15,10.20.0.4,SYSTEM,0,LOCAL,service_install,0,success,installed service svcupdater pointing at C:\Windows\Temp\svc.exe
+2026-03-02T03:40:11Z,10.20.0.15,10.20.0.31,jmorris,4471,SMB,auth_failure,0,failed,access denied to \\dc01\admin$
+2026-03-02T03:40:19Z,10.20.0.15,10.20.0.32,jmorris,4471,SMB,auth_failure,0,failed,access denied to \\dc02\admin$
+2026-03-02T03:40:27Z,10.20.0.15,10.20.0.33,jmorris,4471,SMB,auth_success,1204,success,connected to \\ws33\admin$
+2026-03-02T04:02:55Z,10.20.0.15,10.20.0.4,SYSTEM,0,DNS,query,88,success,resolve c2-node-4471.example-dyn.net
+2026-03-02T04:03:01Z,10.20.0.15,192.0.2.200,SYSTEM,0,HTTPS,beacon,512,success,periodic 60s beacon to 192.0.2.200
+2026-03-02T04:04:01Z,10.20.0.15,192.0.2.200,SYSTEM,0,HTTPS,beacon,512,success,periodic 60s beacon to 192.0.2.200
+2026-03-02T04:05:01Z,10.20.0.15,192.0.2.200,SYSTEM,0,HTTPS,beacon,512,success,periodic 60s beacon to 192.0.2.200
+2026-03-02T04:06:01Z,10.20.0.15,192.0.2.200,SYSTEM,0,HTTPS,beacon,512,success,periodic 60s beacon to 192.0.2.200
+2026-03-02T06:30:12Z,10.20.0.88,10.20.0.9,rlee,5120,SMB,file_read,4021,success,read \\fileserver\shared\onboarding.pdf
+2026-03-02T08:02:41Z,10.20.0.91,10.20.0.9,tchen,5233,SMB,file_read,8810,success,read \\fileserver\shared\handbook.pdf
+2026-03-02T09:15:33Z,10.20.0.77,10.20.0.20,dsingh,5401,HTTPS,login,1400,success,web console login from corporate range
+2026-03-02T09:41:08Z,10.20.0.77,10.20.0.20,dsingh,5401,HTTPS,report_export,22140,success,exported quarterly report
+2026-03-02T11:20:00Z,10.20.0.15,10.20.0.4,SYSTEM,0,LOCAL,log_clear,0,success,cleared Windows Security event log

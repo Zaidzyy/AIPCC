@@ -75,6 +75,13 @@ backend/
       audit.py              # the append-only trail: action vocabulary, redaction, record()
       llm/pricing.py        # tokens -> money; unpriced model costs null, never 0
       grounding.py          # citation validation: fabricated chunk ids are caught here
+    eval/                   # the evaluation harness — see backend/EVAL.md
+      data/                 # vendored MITRE ATT&CK + CWE, pinned and attributed
+      golden/               # committed log + hand-labelled expected findings
+      fixtures/             # recorded provider responses, replayed by the CI gate
+      validators.py         # MITRE / CVE / CWE checks
+      metrics.py            # hallucination, grounding, recall, precision, cost
+      run.py                # python -m app.eval.run [--live] [--record] [--gate]
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -133,6 +140,12 @@ python -m app.db.prune                 # drop aged rate-limit rows (never the au
 python -m app.db.prune --days 0        # ...or all of them
 pytest
 ruff check app tests               # lint; config in backend/ruff.toml
+
+# Evaluation — see backend/EVAL.md
+python -m app.eval.run             # replay the recorded fixtures
+python -m app.eval.run --gate      # ...and exit non-zero on a regression (this is what CI runs)
+python -m app.eval.run --live      # call the configured provider for real
+python -m app.eval.vendor          # refresh the vendored ATT&CK and CWE catalogues
 
 # Frontend
 cd frontend
@@ -202,8 +215,8 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–9 complete and merged. Phase 10 (evidence grounding) complete on
-`phase-10-grounding` — README and screenshots deliberately still not written.**
+**Phases 0–10 complete and merged. Phase 11 (evaluation harness) complete on
+`phase-11-eval` — README and screenshots deliberately still not written.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -235,8 +248,11 @@ structured JSON logging, OpenTelemetry spans across HTTP/SQL/retrieval/LLM, and 
 and cost accounting captured at the provider seam and surfaced as three dashboard charts,
 **and evidence grounding: stable chunk identity, row and line provenance recorded at ingest,
 citations validated against what the model was actually shown, fabricated citations counted, and
-every finding's source log rows visible in the UI.** 463 backend tests and 42 frontend tests pass;
-`ruff check` and `npm run lint` are both clean with no warnings.
+every finding's source log rows visible in the UI,
+**and an evaluation harness measuring hallucination and grounding rates against the real published
+MITRE ATT&CK and CWE catalogues and a hand-labelled golden log, with a deterministic replayed CI
+gate that needs no API key and an in-app Evaluation page.** 512 backend tests and 42 frontend
+tests pass; `ruff check` and `npm run lint` are both clean with no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
 verified manually. The n8n workflow JSONs are corrected and their
@@ -981,5 +997,76 @@ chunk text); re-ingest upserted rather than duplicated; a lookup of a fabricated
 nothing; and the report page showed a grounded finding's two citations as `ROWS 4–9 · CHUNK 1` and
 `ROWS 10–14 · CHUNK 2` with the log lines beneath, alongside an amber "Ungrounded" marker on a
 finding that cited nothing.
+
+### Decisions taken in Phase 11 — the evaluation harness
+
+Full rationale in **`backend/EVAL.md`**, which is written for a reader who has
+not seen this file. The decisions:
+
+**The reference data:**
+
+- **Vendored from the publishers, never hand-written.** ATT&CK Enterprise v17.1 (823 techniques)
+  and CWE v4.20 (969 weaknesses), downloaded by `app/eval/vendor.py`, pinned, SHA-256'd and
+  attributed in `data/SOURCES.md`. An approximated technique list would make every hallucination
+  number a fiction — worse than reporting none — so `TestCatalogue` spot-checks the files against
+  known facts and a truncated or invented catalogue fails the suite.
+- **What is committed is a derivation, not the raw download.** The STIX bundle is 45 MB of graph
+  data; this project needs an id and a name. The derivation script ships with its output so the
+  projection is auditable and reproducible.
+- **Deprecated and revoked techniques are kept and flagged.** A model naming `T1022` did not invent
+  an id — ATT&CK retired it — and counting that as a hallucination would make the rate climb with
+  the calendar rather than with model behaviour.
+- **CVE existence is deliberately not checked, and the harness says so.** The list is unbounded and
+  grows daily, so checking it needs a network call; a gate that needs the internet fails on a bad
+  day and is deleted on the next. Format is checked, and the docs state that this is weaker.
+
+**The gate:**
+
+- **CI replays; it never calls a model.** A live gate needs a secret, costs money per push, and is
+  non-deterministic — and a flaky quality gate gets `continue-on-error`'d within a week and deleted
+  within a month. The eval job runs with no Postgres, no Chroma, no embedding model, no network and
+  no API key: it chunks the committed golden log with the real `chunk_logs` and replays responses
+  recorded once from Gemini.
+- **The fixtures are real recordings, not synthetic.** A real key was available, so they were
+  recorded rather than written. `TestReplay` asserts the cassette's `recorded_from` names a real
+  provider, because a synthetic fixture would change what every replayed number means.
+- **Keyed by the SHA-256 of the exact prompt**, and by attempt number so a repair retry replays its
+  *second* response. Change a prompt and replay misses loudly with "re-record" — silently replaying
+  an old response against a new prompt would report the old model's quality as the new prompt's.
+- **A replayed call reports no tokens and no cost.** It spent nothing; reporting the recorded
+  numbers would make a replayed run look like it cost money.
+- **Thresholds are configuration, and are not set to perfection.** A gate demanding 0% fails on its
+  first honest run and gets deleted. They sit where the recorded baseline sits, so a regression
+  trips them and normal variation does not.
+- **Refusing to answer is not a passing grade.** Every rate is `None` on a zero denominator, which
+  would sail through every threshold, so the gate separately fails a run that emitted no
+  identifiers or no findings at all.
+
+**The metrics:**
+
+- **Two recalls, because one number could not honestly carry both meanings.** Coverage (the label
+  appears anywhere) and distinct (one label per finding). The first live run scored 100% coverage
+  and 55.6% distinct: three attack findings covered seven labels because one was a campaign
+  narrative mentioning PowerShell, SMB, the beacon and the log clearing in passing. Bundling is
+  defensible analysis, not an error — but scoring it as seven recalled findings would be
+  flattering, and only reporting the strict number would penalise a good summary. The gap is the
+  interesting figure. *(The first version of the matcher reported only coverage, and its
+  "unmatched findings" list was wrong as a result — found by reading the output, not the code.)*
+- **MITRE agreement is reported, never enforced.** The live run scored 14.3%, and the model was
+  arguably right more often than the label: `T1567.002` (*Exfiltration to Cloud Storage*) for an
+  upload to a CDN where the label said `T1041`, and `T1543.003` (*Windows Service*) where the label
+  said `T1547` for a log containing both a Run key and a service. Enforcing agreement would measure
+  proximity to one labeller's opinion; the gate acts on *validity* instead.
+- **Precision counts only findings labelled benign as false positives.** A finding the labeller did
+  not think of may be right; `rlee` reading a PDF called an attack is not.
+
+**What the harness does not cover, stated rather than implied:** retrieval quality (golden
+retrieval is a fixed selection over a 35-row log, so a worse retriever would not move these
+numbers), generalisation beyond one synthetic CSV, and the behaviour of the current model in
+replay mode. All three are in `EVAL.md` under "What it does not prove".
+
+**Measured on a real live run** (`gemini-2.5-flash`, 2026-08-10): hallucination rate 0.0% (0/6
+identifiers), grounding rate 100% (23/23 findings), coverage recall 100% (9/9), distinct recall
+55.6%, precision 100%, section success 100%, retry rate 0%, 45,096 tokens, $0.078, 32.7 s.
 
 **Update this section at the end of every phase.**
