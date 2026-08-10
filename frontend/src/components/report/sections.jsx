@@ -1,5 +1,6 @@
 import { CircleDashed } from "lucide-react";
 
+import { Evidence } from "@/components/report/Evidence";
 import {
   Badge,
   SeverityBadge,
@@ -21,7 +22,18 @@ import { cn } from "@/lib/utils";
  * than as a silently wrong value. Every field is nullable by design: the
  * prompts instruct the model to emit null rather than invent a CVE, so `—`
  * is a legitimate value throughout, not a rendering failure.
+ *
+ * Each section takes an `evidence` map from finding id to its citations
+ * (Phase 10). `undefined` means this view has no evidence to show at all —
+ * the public share view — and every disclosure disappears; an empty array
+ * means the finding is ungrounded and says so. The two are not the same and
+ * `Evidence` renders them differently.
  */
+
+/** The citations for one finding, or `null` when this view carries none. */
+function evidenceFor(map, item) {
+  return map ? (map.get(item.id) ?? []) : null;
+}
 
 export function SectionEmpty({ label }) {
   return (
@@ -37,13 +49,13 @@ function severityRule(level) {
   return cn("border-l-2 pl-4", severityToken(level).rule);
 }
 
-export function AttackTypes({ items }) {
+export function AttackTypes({ items, evidence }) {
   if (!items?.length) return <SectionEmpty label="attack types" />;
 
   return (
     <ul className="divide-y divide-line/70">
       {items.map((attack, index) => (
-        <li key={index} className="px-5 py-5">
+        <li key={attack.id ?? index} className="px-5 py-5">
           <div className={severityRule(attack.risk_level)}>
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -74,6 +86,8 @@ export function AttackTypes({ items }) {
               <Detail label="Impact" value={attack.impact} className="sm:col-span-2" />
               <Detail label="Mitigation" value={attack.mitigation} className="sm:col-span-2" />
             </dl>
+
+            <Evidence rows={evidenceFor(evidence, attack)} />
           </div>
         </li>
       ))}
@@ -81,7 +95,7 @@ export function AttackTypes({ items }) {
   );
 }
 
-export function RiskAssessment({ items }) {
+export function RiskAssessment({ items, evidence }) {
   if (!items?.length) return <SectionEmpty label="general risks" />;
 
   return (
@@ -96,7 +110,7 @@ export function RiskAssessment({ items }) {
       </THead>
       <TBody>
         {items.map((risk, index) => (
-          <TR key={index}>
+          <TR key={risk.id ?? index}>
             <TD>
               <p className="font-medium text-ink">{orDash(risk.risk_name)}</p>
               {risk.risk_description && (
@@ -110,6 +124,9 @@ export function RiskAssessment({ items }) {
                   {risk.impact}
                 </p>
               )}
+              <div className="mt-2">
+                <Evidence rows={evidenceFor(evidence, risk)} compact />
+              </div>
             </TD>
             <TD>
               <SeverityBadge level={risk.risk_level} />
@@ -125,13 +142,13 @@ export function RiskAssessment({ items }) {
   );
 }
 
-export function Vulnerabilities({ items }) {
+export function Vulnerabilities({ items, evidence }) {
   if (!items?.length) return <SectionEmpty label="vulnerabilities" />;
 
   return (
     <ul className="divide-y divide-line/70">
       {items.map((vulnerability, index) => (
-        <li key={index} className="px-5 py-5">
+        <li key={vulnerability.id ?? index} className="px-5 py-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <h3 className="font-mono text-[0.9375rem] font-semibold text-ink">
               {orDash(vulnerability.vulnerability_name)}
@@ -154,13 +171,15 @@ export function Vulnerabilities({ items }) {
             <Detail label={vulnerability.cve_id ?? "CVE"} value={vulnerability.cve_description} />
             <Detail label={vulnerability.cwe_id ?? "CWE"} value={vulnerability.cwe_description} />
           </dl>
+
+          <Evidence rows={evidenceFor(evidence, vulnerability)} />
         </li>
       ))}
     </ul>
   );
 }
 
-export function Anomalies({ items }) {
+export function Anomalies({ items, evidence }) {
   if (!items?.length) return <SectionEmpty label="anomalies" />;
 
   return (
@@ -176,7 +195,7 @@ export function Anomalies({ items }) {
       </THead>
       <TBody>
         {items.map((anomaly, index) => (
-          <TR key={index}>
+          <TR key={anomaly.id ?? index}>
             <TD>
               <p className="font-medium text-ink">{orDash(anomaly.anomaly_name)}</p>
               {(anomaly.first_occurrence || anomaly.last_occurrence) && (
@@ -184,6 +203,9 @@ export function Anomalies({ items }) {
                   {orDash(anomaly.first_occurrence)} → {orDash(anomaly.last_occurrence)}
                 </p>
               )}
+              <div className="mt-2">
+                <Evidence rows={evidenceFor(evidence, anomaly)} compact />
+              </div>
             </TD>
             <TD className="hidden md:table-cell">
               <span className="text-ink">{orDash(anomaly.user_name)}</span>
@@ -207,7 +229,7 @@ export function Anomalies({ items }) {
   );
 }
 
-export function Timeline({ items }) {
+export function Timeline({ items, evidence }) {
   if (!items?.length) return <SectionEmpty label="timeline events" />;
 
   return (
@@ -219,7 +241,7 @@ export function Timeline({ items }) {
         aria-hidden="true"
       />
       {items.map((event, index) => (
-        <li key={index} className="relative flex gap-4 py-3">
+        <li key={event.id ?? index} className="relative flex gap-4 py-3">
           <span
             className="relative z-10 mt-1.5 size-2 shrink-0 rounded-full bg-ink-faint ring-4 ring-surface"
             aria-hidden="true"
@@ -236,6 +258,9 @@ export function Timeline({ items }) {
                 </>
               )}
             </p>
+            <div className="mt-1.5">
+              <Evidence rows={evidenceFor(evidence, event)} compact />
+            </div>
           </div>
         </li>
       ))}

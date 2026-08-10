@@ -74,6 +74,7 @@ backend/
       ratelimit.py          # IP lockout + per-account progressive delay, state in Postgres
       audit.py              # the append-only trail: action vocabulary, redaction, record()
       llm/pricing.py        # tokens -> money; unpriced model costs null, never 0
+      grounding.py          # citation validation: fabricated chunk ids are caught here
   alembic/                  # migrations
   tests/                    # pytest
 frontend/
@@ -201,8 +202,8 @@ the intro clip's full-screen flash.
 
 ## Current status
 
-**Phases 0–8 complete and merged. Phase 9 (observability + LLM cost accounting) complete on
-`phase-9-observability` — README and screenshots deliberately still not written.**
+**Phases 0–9 complete and merged. Phase 10 (evidence grounding) complete on
+`phase-10-grounding` — README and screenshots deliberately still not written.**
 See `AIPCC_CLAUDE_CODE_PROMPTS.md` for the phase sequence and
 `AIPCC_REBUILD_PLAN.md` for the full architecture rationale.
 
@@ -231,9 +232,11 @@ API and its docs, and an append-only audit log enforced by a Postgres trigger, w
 filterable view,
 **and end-to-end observability: a correlation id on every response header, log line and audit row,
 structured JSON logging, OpenTelemetry spans across HTTP/SQL/retrieval/LLM, and per-call LLM token
-and cost accounting captured at the provider seam and surfaced as three dashboard charts.**
-425 backend tests and 39 frontend tests pass; `ruff check` and `npm run lint` are both clean with
-no warnings.
+and cost accounting captured at the provider seam and surfaced as three dashboard charts,
+**and evidence grounding: stable chunk identity, row and line provenance recorded at ingest,
+citations validated against what the model was actually shown, fabricated citations counted, and
+every finding's source log rows visible in the UI.** 463 backend tests and 42 frontend tests pass;
+`ruff check` and `npm run lint` are both clean with no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
 verified manually. The n8n workflow JSONs are corrected and their
@@ -889,5 +892,94 @@ landing in the audit view.
 - **A test asserted against the wrong log line.** `next(r for r in caplog.records ...)` returns the
   *first* access record, which for a test that had to mint an API key first was the JWT call that
   minted it. The helper now returns the list and callers take the last.
+
+### Decisions taken in Phase 10 — evidence grounding
+
+**Chunk identity:**
+
+- **`(document_id, chunk_id)` is the citation key, and it is now the Chroma id too.** The pair was
+  already stable — the splitter is deterministic, so the same bytes produce the same chunk at the
+  same index — but Chroma's own id was random, so re-ingesting a file *appended* a second copy of
+  every chunk rather than replacing it. `chunk_key()` makes re-ingest an upsert, makes a citation
+  resolvable by primary key instead of a metadata scan, and turns the Phase 7 idempotency guard
+  into a second line of defence rather than the only one. Verified: re-ingesting the sample CSV
+  leaves 197 chunks, not 394.
+- **The model cites integers, not composite keys.** "chunk 7" is something a language model gets
+  right; a uuid pair is something it invents. The document is implied by which report is being
+  generated, so nothing is lost.
+
+**Row and line provenance:**
+
+- **Recorded at ingest, because that is the only moment it exists.** `chunk_logs` serialises a
+  DataFrame to CSV and hands the text to a character splitter; once the chunks come back there is
+  no way to recover which rows produced them.
+- **Exact or absent, never approximate.** The row mapping assumes `to_csv` writes one physical line
+  per row, which is false when a field contains a newline — `to_csv` quotes it and every row number
+  after it is wrong. The assumption is *checked* against the row count, and when it fails row
+  provenance is omitted for that document and logged. A citation that points at the wrong log rows
+  is worse than one that admits it cannot point at any, because a wrong one is only discovered by
+  someone checking it, which is the thing citations exist to avoid.
+- **The offset search is a forward scan from a cursor, not `text.find(chunk)`.** Log files repeat;
+  a hundred lines can be byte-identical, and searching from zero mis-locates every chunk after the
+  first duplicate.
+- **Line numbers are 1-based, row indices 0-based.** Lines are shown to a person next to a log file
+  and no editor numbers its first line 0; rows are DataFrame indices and pandas starts at 0.
+  Mixing them is why the header offset gets its own test.
+
+**The evidence table:**
+
+- **One table for all five sections, not five.** Per-section tables would be five migrations for
+  one concept, five joins to render a report, and five queries to compute a grounding rate — and
+  Phase 11 wants that rate as one number. The cost is that `item_id` carries no foreign key,
+  because it points into one of five tables; the cascade on `report_id` covers deletion anyway.
+- **The excerpt is a copy, not a reference.** Chroma is a separate volume from Postgres and the two
+  can go out of step. A report that could no longer show what it was based on because the vector
+  store was rebuilt would be a report whose evidence evaporated.
+- **`evidence` is a schema field with no column, and `id` is a column the model must never see.**
+  Both exclusions live in one place — `STORAGE_EXCLUDED` and `PROMPT_EXCLUDED` in
+  `schemas/report.py` — and `storage_dump()` applies them, so no storage code names a field as a
+  string literal and hard rule "field names are never written twice" survives intact.
+- **The skeleton shows `"evidence": [0]`, not `null`.** It is the one field where the prompt has to
+  teach a *shape*: a model told `null` returns null, and every finding in the report comes back
+  ungrounded.
+
+**Validation, and what happens to a finding that fails it:**
+
+- **Validity is judged against what the section was actually shown**, not merely against the
+  document. A chunk that exists but was never retrieved for that section is still a fabrication —
+  the model cannot have read it. The two are counted separately (`unknown_citations`,
+  `unseen_citations`) because they are different failures.
+- **An ungrounded finding is flagged, never dropped.** Dropping it would make the report look
+  cleaner than the model's actual output — the same failure as an empty section reported as a
+  success — and it would make the grounding rate unmeasurable, since the ungrounded findings would
+  no longer exist to count. The UI says "Ungrounded" in amber next to the claim.
+- **Citation coercion is deliberately permissive; validation is not.** Models write `[0, 3]`,
+  `["0","3"]`, `"0, 3"`, `"chunk 3"`, `3` and `[{"chunk_id": 2}]` for the same thing. Failing a
+  whole section over the punctuation would be absurd when the *next* step checks the number against
+  the document. What coercion never does is invent: a string with no digits yields no citation
+  rather than a reference to chunk 0.
+- **`evidence` is excluded from `is_empty()`.** Otherwise a stray `"evidence": [0]` on an otherwise
+  all-null item rescues the skeleton and reopens the exact hole Phase 1 closed.
+
+**UI:**
+
+- **The public share view gets no evidence at all**, and `groupEvidence` returns `null` there
+  rather than an empty map. A share link grants read of a *report*; shipping the raw log excerpts
+  with it would hand the holder more of the source data than the report itself contains. `null`
+  (no disclosures at all) and `[]` (this finding is ungrounded) are different states and the
+  component renders them differently — with a frontend test for exactly that distinction.
+- **Native `<details>`, not a Radix disclosure.** A report can hold sixty findings; sixty pieces of
+  React state to reproduce keyboard handling and find-in-page that the browser already has is a bad
+  trade.
+- **Section rows now load with an explicit `ORDER BY id`.** Without one Postgres may return
+  findings in a different order on each load, so the exported PDF would stop matching the screen.
+  Latent before this phase; evidence made it visible.
+
+**Verified by running:** a real ingest of the sample CSV produced 197 chunks whose row spans were
+checked against the source file (chunks 0, 1, 2 and 50 — first and last row of each present in the
+chunk text); re-ingest upserted rather than duplicated; a lookup of a fabricated chunk id returned
+nothing; and the report page showed a grounded finding's two citations as `ROWS 4–9 · CHUNK 1` and
+`ROWS 10–14 · CHUNK 2` with the log lines beneath, alongside an amber "Ungrounded" marker on a
+finding that cited nothing.
 
 **Update this section at the end of every phase.**

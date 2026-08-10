@@ -50,6 +50,7 @@ from app.schemas.report import (
     field_list,
     json_skeleton,
 )
+from app.services.grounding import GroundingResult, SourceChunk, render_context, resolve
 from app.services.llm import LLMError, LLMProvider, get_llm_provider
 
 logger = logging.getLogger(__name__)
@@ -147,6 +148,8 @@ SECTION_SPECS_BY_NAME = {spec.name: spec for spec in SECTION_SPECS}
 def build_prompt(spec: SectionSpec, context: str) -> str:
     return f"""You are a security analyst. Analyse the log data below and return your findings.
 
+Each block of log data is preceded by a marker of the form [chunk N].
+
 LOG DATA
 --------
 {context}
@@ -157,6 +160,10 @@ REQUIREMENTS
 - Include only these fields: {field_list(spec.item_model)}
 - Keep every key. If a value is unknown or not present in the data, set it to null.
 - Base every finding on the log data above. Do not speculate.
+- "evidence" must list the numbers of the [chunk N] blocks this finding came
+  from — at least one. Cite only numbers that appear above; do not guess a
+  number and do not cite a chunk you did not use. A finding you cannot point
+  at a chunk for is a finding you should not report.
 
 OUTPUT
 ------
@@ -229,8 +236,19 @@ def extract_json(raw: str) -> dict:
 # --- Retrieval ------------------------------------------------------------
 
 
-def retrieve_context(spec: SectionSpec, document_id: str) -> str:
-    """Fetch the chunks relevant to this section, scoped to one document."""
+def retrieve_context(spec: SectionSpec, document_id: str) -> list[SourceChunk]:
+    """Fetch the chunks relevant to this section, scoped to one document.
+
+    Returns the chunks themselves rather than one joined string. Phase 10 needs
+    their ids to number the prompt and their row spans to show an analyst which
+    log lines a finding came from; a concatenated blob has thrown both away by
+    the time anyone wants them.
+
+    De-duplicated by `chunk_id`, not by content. Two different chunks of a log
+    file can be byte-identical, and collapsing them — which is what the
+    previous content-based `seen` set did — silently removed a citable source
+    and would have made a perfectly good citation unresolvable.
+    """
     from app.services.rag.vectorstore import get_vectorstore
 
     with tracer.start_as_current_span("rag.retrieve") as span:
@@ -239,20 +257,19 @@ def retrieve_context(spec: SectionSpec, document_id: str) -> str:
         span.set_attribute("rag.queries", len(spec.queries))
 
         store = get_vectorstore()
-        chunks: list[str] = []
-        seen: set[str] = set()
+        chunks: dict[int, SourceChunk] = {}
         for query in spec.queries:
             for doc in store.similarity_search(
                 query, k=spec.retrieval_k, filter={"document_id": str(document_id)}
             ):
-                if doc.page_content not in seen:
-                    seen.add(doc.page_content)
-                    chunks.append(doc.page_content)
+                chunk = SourceChunk.from_document(doc)
+                if chunk.chunk_id >= 0:
+                    chunks.setdefault(chunk.chunk_id, chunk)
 
         # The count and the size, never the content — a span goes to a
         # collector, and log data does not leave this system that way.
         span.set_attribute("rag.chunks", len(chunks))
-        return "\n--\n".join(chunks)
+        return [chunks[key] for key in sorted(chunks)]
 
 
 # --- Section generation ---------------------------------------------------
@@ -267,6 +284,8 @@ class SectionOutcome:
     # here rather than written here: the generator has never touched the
     # database and does not start now.
     usage: list[LlmCallRecord] = field(default_factory=list)
+    # Resolved citations and the counts of the ones that were fabricated.
+    grounding: GroundingResult = field(default_factory=GroundingResult)
 
 
 async def generate_section(
@@ -281,7 +300,7 @@ async def generate_section(
         span.set_attribute("section.name", spec.name)
 
         try:
-            context = await asyncio.to_thread(retrieve_context, spec, document_id)
+            chunks = await asyncio.to_thread(retrieve_context, spec, document_id)
         except Exception as exc:
             logger.exception("retrieval failed for section %s", spec.name)
             return SectionOutcome(
@@ -291,7 +310,7 @@ async def generate_section(
                 ),
             )
 
-        if not context.strip():
+        if not chunks:
             return SectionOutcome(
                 spec.name,
                 error=SectionError(
@@ -304,7 +323,21 @@ async def generate_section(
                 ),
             )
 
-        return await _attempt_section(spec, provider, context, usage, span)
+        outcome = await _attempt_section(
+            spec, provider, render_context(chunks), usage, span
+        )
+
+        # Citations are resolved after the section validates, against the
+        # chunks this section was actually shown. A finding that cites nothing
+        # valid stays in the report and is simply absent from the evidence
+        # table — flagged, not dropped. See `services/grounding.py`.
+        if outcome.items:
+            outcome.grounding = resolve(spec.name, outcome.items, chunks)
+            span.set_attribute("section.ungrounded", outcome.grounding.ungrounded_items)
+            span.set_attribute(
+                "section.invalid_citations", outcome.grounding.invalid_citations
+            )
+        return outcome
 
 
 def _record(
@@ -450,6 +483,7 @@ async def generate_report(
         sections = ReportSections()
         errors: list[SectionError] = []
         usage: list[LlmCallRecord] = []
+        grounding = GroundingResult()
 
         for spec, outcome in zip(SECTION_SPECS, outcomes, strict=True):
             if isinstance(outcome, BaseException):
@@ -463,6 +497,7 @@ async def generate_report(
                 )
                 continue
             usage.extend(outcome.usage)
+            grounding.merge(outcome.grounding)
             if outcome.error:
                 errors.append(outcome.error)
             else:
@@ -479,6 +514,9 @@ async def generate_report(
         if costs:
             span.set_attribute("report.cost_usd", sum(costs))
 
+        span.set_attribute("report.evidence", len(grounding.records))
+        span.set_attribute("report.invalid_citations", grounding.invalid_citations)
+
         logger.info(
             "report generated",
             extra={
@@ -488,9 +526,18 @@ async def generate_report(
                 "llm_calls": len(usage),
                 "generation_ms": generation_ms,
                 "cost_usd": sum(costs) if costs else None,
+                "evidence": len(grounding.records),
+                "ungrounded_findings": grounding.ungrounded_items,
+                "invalid_citations": grounding.invalid_citations,
             },
         )
 
         return ReportGenerationResult(
-            sections=sections, errors=errors, usage=usage, generation_ms=generation_ms
+            sections=sections,
+            errors=errors,
+            usage=usage,
+            generation_ms=generation_ms,
+            evidence=grounding.records,
+            ungrounded_findings=grounding.ungrounded_items,
+            invalid_citations=grounding.invalid_citations,
         )
