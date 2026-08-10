@@ -16,6 +16,9 @@ from sqlalchemy import inspect
 
 from app.db import models
 from app.schemas.report import (
+    NON_COLUMN_FIELDS,
+    PROMPT_EXCLUDED,
+    STORAGE_EXCLUDED,
     AnomalyItem,
     AttackTypeItem,
     ReportSections,
@@ -103,13 +106,7 @@ def attack_spec():
     return SECTION_SPECS_BY_NAME["attack_types"]
 
 
-@pytest.fixture
-def no_retrieval(monkeypatch):
-    """Bypass Chroma; these tests are about parsing, not retrieval."""
-    monkeypatch.setattr(
-        "app.services.report.retrieve_context",
-        lambda spec, document_id: "some log context",
-    )
+
 
 
 # --- The alignment guarantee ---------------------------------------------
@@ -122,7 +119,9 @@ class TestSchemaAlignment:
     def test_every_schema_field_is_a_column(self, section_name):
         model_cls, _, item_model = SECTION_TABLES[section_name]
         columns = {c.key for c in inspect(model_cls).columns}
-        schema_fields = set(item_model.model_fields)
+        # `evidence` is deliberately not a column — it lives in
+        # `finding_evidence`, keyed by (report, section, item).
+        schema_fields = set(item_model.model_fields) - NON_COLUMN_FIELDS
         missing = schema_fields - columns
         assert not missing, (
             f"{item_model.__name__} has fields with no column on "
@@ -133,7 +132,7 @@ class TestSchemaAlignment:
     def test_storage_uses_no_literal_field_names(self, section_name):
         """model_dump() must be directly constructible into the ORM model."""
         model_cls, _, item_model = SECTION_TABLES[section_name]
-        row = model_cls(report_id=uuid.uuid4(), **item_model().model_dump())
+        row = model_cls(report_id=uuid.uuid4(), **item_model().storage_dump())
         assert row is not None
 
     def test_sections_cover_every_spec(self):
@@ -143,7 +142,12 @@ class TestSchemaAlignment:
     def test_prompt_skeleton_matches_schema(self, attack_spec):
         skeleton = json_skeleton(attack_spec.envelope)
         for name in AttackTypeItem.model_fields:
-            assert f'"{name}"' in skeleton
+            if name in PROMPT_EXCLUDED:
+                # `id` is assigned by the database. A model shown the field
+                # invents a uuid for it.
+                assert f'"{name}"' not in skeleton
+            else:
+                assert f'"{name}"' in skeleton
 
     def test_nested_risk_assessment_is_not_reintroduced(self):
         """The prototype nested these; the table stores them flat."""
@@ -374,8 +378,17 @@ def _valid_for_prompt(prompt: str) -> str:
 
     for spec in SECTION_SPECS:
         if f'"{spec.name}"' in prompt:
-            first_field = next(iter(spec.item_model.model_fields))
-            return _json.dumps({spec.name: [{first_field: "something"}]})
+            # The first *content* field. `id` and `evidence` are structural:
+            # filling `id` with "something" fails uuid validation, and filling
+            # only `evidence` leaves the item empty, which is rejected.
+            first_field = next(
+                name
+                for name in spec.item_model.model_fields
+                if name not in PROMPT_EXCLUDED and name != "evidence"
+            )
+            return _json.dumps(
+                {spec.name: [{first_field: "something", "evidence": [0]}]}
+            )
     raise AssertionError("prompt matched no known section")
 
 
@@ -476,6 +489,12 @@ class TestStorage:
         original = sections.attack_types[0]
         restored = loaded.attack_types[0]
         for name in AttackTypeItem.model_fields:
+            if name in STORAGE_EXCLUDED:
+                # `id` is assigned by the database, so the original carries
+                # None and the restored row carries a real key — that is the
+                # round trip working, not failing. `evidence` has its own
+                # table and its own tests.
+                continue
             assert getattr(restored, name) == getattr(original, name), (
                 f"attack_types.{name} did not survive the round trip"
             )

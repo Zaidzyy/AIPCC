@@ -58,6 +58,9 @@ async def generate_report_endpoint(
         errors=result.errors,
         usage=result.usage,
         generation_ms=result.generation_ms,
+        evidence=result.evidence,
+        ungrounded_findings=result.ungrounded_findings,
+        invalid_citations=result.invalid_citations,
     )
 
     # Recorded before the 502 below, so a generation that produced nothing is
@@ -80,6 +83,11 @@ async def generate_report_endpoint(
             "section_errors": len(result.errors),
             "cost_usd": report.total_cost_usd,
             "total_tokens": report.total_tokens,
+            "ungrounded_findings": report.ungrounded_findings,
+            # A non-zero count here means the model cited log content that was
+            # never given to it. Worth an audit row of its own, because it is a
+            # property of the *model*, not of the request.
+            "invalid_citations": report.invalid_citations,
         },
     )
 

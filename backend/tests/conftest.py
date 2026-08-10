@@ -17,6 +17,7 @@ from app.core.security import hash_password
 from app.db import models
 from app.db.session import engine, get_db
 from app.main import app
+from app.services.grounding import SourceChunk
 
 FIXTURES = Path(__file__).parent / "fixtures"
 PASSWORD = "test-password-123"
@@ -48,6 +49,31 @@ def spans(_tracing) -> InMemorySpanExporter:
     """Spans produced by this test alone."""
     _tracing.clear()
     return _tracing
+
+
+# Two chunks with distinct ids and known provenance, so a citation test can
+# tell a real reference from a fabricated one without needing Chroma. Lives
+# here rather than in one test module because three of them retrieve.
+STUB_CHUNKS = [
+    SourceChunk(
+        chunk_id=0, content="some log context",
+        row_start=0, row_end=4, line_start=2, line_end=6,
+    ),
+    SourceChunk(
+        chunk_id=1, content="more log context",
+        row_start=5, row_end=9, line_start=7, line_end=11,
+    ),
+]
+
+
+@pytest.fixture
+def no_retrieval(monkeypatch):
+    """Bypass Chroma. These tests are about parsing, measurement and citation
+    validation, none of which needs a real embedding model."""
+    monkeypatch.setattr(
+        "app.services.report.retrieve_context",
+        lambda spec, document_id: list(STUB_CHUNKS),
+    )
 
 
 @pytest.fixture

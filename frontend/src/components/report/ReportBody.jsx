@@ -7,6 +7,7 @@ import {
 } from "@/components/report/sections";
 import { ThreatIntel } from "@/components/report/ThreatIntel";
 import { Card, CardHeader, CardTitle } from "@/components/ui";
+import { groupEvidence } from "@/lib/evidence";
 
 /**
  * The body of a report — the five sections and its threat intelligence.
@@ -29,6 +30,12 @@ const SECTIONS = [
 ];
 
 export function ReportBody({ report }) {
+  // Grouped once for the whole report rather than filtered per finding, which
+  // would be O(findings x evidence) on a page that can hold sixty of each.
+  // `null` when the response carries no evidence at all — the public share
+  // view — and every disclosure disappears with it.
+  const evidence = groupEvidence(report);
+
   return (
     <div className="space-y-6">
       {SECTIONS.map(({ key, label, Component }) => (
@@ -39,7 +46,7 @@ export function ReportBody({ report }) {
               {report.sections[key]?.length ?? 0}
             </span>
           </CardHeader>
-          <Component items={report.sections[key]} />
+          <Component items={report.sections[key]} evidence={evidence} />
         </Card>
       ))}
 

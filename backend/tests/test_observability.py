@@ -40,15 +40,6 @@ def attack_spec():
     return SECTION_SPECS_BY_NAME["attack_types"]
 
 
-@pytest.fixture
-def no_retrieval(monkeypatch):
-    """Bypass Chroma; these tests are about measurement, not retrieval."""
-    monkeypatch.setattr(
-        "app.services.report.retrieve_context",
-        lambda spec, document_id: "some log context",
-    )
-
-
 def _access_lines(caplog):
     """Every access record, in order.
 

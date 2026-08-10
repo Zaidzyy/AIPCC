@@ -26,6 +26,7 @@ from app.db import models
 from app.schemas.report import (
     AnomalyItem,
     AttackTypeItem,
+    EvidenceItem,
     LlmCallRecord,
     ReportDetail,
     ReportSections,
@@ -72,6 +73,9 @@ def store_report(
     threat_intel: list[ThreatIntelCreate] | None = None,
     usage: list[LlmCallRecord] | None = None,
     generation_ms: float | None = None,
+    evidence: list | None = None,
+    ungrounded_findings: int | None = None,
+    invalid_citations: int | None = None,
 ) -> models.Report:
     """Persist a generated report and all its sections. Commits.
 
@@ -111,6 +115,8 @@ def store_report(
         total_tokens=sum(token_values) if token_values else None,
         total_cost_usd=sum(cost_values) if cost_values else None,
         generation_ms=generation_ms,
+        ungrounded_findings=ungrounded_findings,
+        invalid_citations=invalid_citations,
         # Seal the source document as it is right now. A missing or unreadable
         # file leaves this null and the report UNKNOWN rather than failing the
         # write — an unsealable report is still a report.
@@ -121,9 +127,42 @@ def store_report(
     # step the prototype was missing.
     db.flush()
 
+    # Evidence is keyed by (section, item index) on the way in and by the row's
+    # primary key on the way out, so the section rows have to exist first. They
+    # are flushed as a batch below rather than one at a time.
+    item_ids: dict[tuple[str, int], uuid.UUID] = {}
     for section_name, (model_cls, _, _) in SECTION_TABLES.items():
-        for item in getattr(sections, section_name):
-            db.add(model_cls(report_id=report.report_id, **item.model_dump()))
+        for index, item in enumerate(getattr(sections, section_name)):
+            # `storage_dump()`, not `model_dump()`: `evidence` is a schema field
+            # with no column, and it is subtracted inside the schema so no
+            # storage code has to name a field as a string literal here.
+            row = model_cls(report_id=report.report_id, **item.storage_dump())
+            db.add(row)
+            item_ids[(section_name, index)] = row
+
+    db.flush()
+
+    for record in evidence or []:
+        row = item_ids.get((record.section, record.item_index))
+        if row is None:
+            # A citation for an item that is not in this report. Only reachable
+            # if a caller passes mismatched arguments; skipped rather than
+            # written against a null item id, which would be evidence attached
+            # to nothing.
+            continue
+        db.add(
+            models.FindingEvidence(
+                report_id=report.report_id,
+                section=record.section,
+                item_id=row.id,
+                chunk_id=record.chunk_id,
+                row_start=record.row_start,
+                row_end=record.row_end,
+                line_start=record.line_start,
+                line_end=record.line_end,
+                excerpt=record.excerpt,
+            )
+        )
 
     for indicator in threat_intel or []:
         db.add(models.ThreatIntel(report_id=report.report_id, **indicator.model_dump()))
@@ -156,7 +195,13 @@ def load_report_sections(db: Session, report_id: uuid.UUID) -> ReportSections:
     sections = ReportSections()
     for section_name, (model_cls, _, item_model) in SECTION_TABLES.items():
         rows = db.scalars(
-            select(model_cls).where(model_cls.report_id == report_id)
+            # Ordered by primary key. Without it Postgres is free to return
+            # rows in any order, so a report could render its findings in a
+            # different sequence on each load — and the exported PDF would not
+            # match the screen.
+            select(model_cls)
+            .where(model_cls.report_id == report_id)
+            .order_by(model_cls.id)
         ).all()
         setattr(
             sections,
@@ -164,6 +209,21 @@ def load_report_sections(db: Session, report_id: uuid.UUID) -> ReportSections:
             [item_model.model_validate(row, from_attributes=True) for row in rows],
         )
     return sections
+
+
+def load_evidence(db: Session, report_id: uuid.UUID) -> list[EvidenceItem]:
+    """Every citation in one report, flat and in one query.
+
+    Flat rather than nested inside each finding: the sections already come back
+    as five separate lists, and nesting would change all five response shapes
+    to carry a field only one client uses. The UI joins on `item_id`.
+    """
+    rows = db.scalars(
+        select(models.FindingEvidence)
+        .where(models.FindingEvidence.report_id == report_id)
+        .order_by(models.FindingEvidence.chunk_id)
+    ).all()
+    return [EvidenceItem.model_validate(row, from_attributes=True) for row in rows]
 
 
 def load_report_detail(db: Session, report: models.Report) -> ReportDetail:
@@ -174,6 +234,9 @@ def load_report_detail(db: Session, report: models.Report) -> ReportDetail:
     ).all()
 
     return ReportDetail(
+        evidence=load_evidence(db, report.report_id),
+        ungrounded_findings=report.ungrounded_findings,
+        invalid_citations=report.invalid_citations,
         report_id=report.report_id,
         report_name=report.report_name,
         document_id=report.document_id,

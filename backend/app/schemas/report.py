@@ -17,6 +17,7 @@ straight `Model(**item.model_dump())`.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime
 from typing import Annotated, Literal, get_args
@@ -48,10 +49,61 @@ Text = Annotated[str | None, BeforeValidator(_blank_to_none)]
 Count = Annotated[int | None, BeforeValidator(_to_int)]
 
 
+def _to_chunk_ids(value: object) -> object:
+    """Coerce whatever the model emitted for `evidence` into a list of ints.
+
+    Models write `[0, 3]`, `["0", "3"]`, `"0, 3"`, `"chunk 3"` and `3`. All of
+    those mean the same thing and none is worth failing a whole section over —
+    the citation is *validated against the document* immediately afterwards,
+    which is the check that matters. Anything with no integer in it is dropped
+    here rather than becoming a fake reference to chunk 0.
+    """
+    if value is None:
+        return []
+    if isinstance(value, (int, str)):
+        value = [value]
+    if not isinstance(value, list):
+        return []
+
+    ids: list[int] = []
+    for entry in value:
+        if isinstance(entry, bool):
+            continue
+        if isinstance(entry, int):
+            ids.append(entry)
+        elif isinstance(entry, float) and entry.is_integer():
+            ids.append(int(entry))
+        elif isinstance(entry, str):
+            found = re.findall(r"\d+", entry)
+            ids.extend(int(number) for number in found)
+        elif isinstance(entry, dict):
+            # `{"chunk_id": 3}` — some models wrap it.
+            for key in ("chunk_id", "chunk", "id"):
+                if isinstance(entry.get(key), int):
+                    ids.append(entry[key])
+                    break
+    # Ordered, de-duplicated: citing the same chunk twice is not two sources.
+    return list(dict.fromkeys(ids))
+
+
+Evidence = Annotated[list[int], BeforeValidator(_to_chunk_ids)]
+
+
 class SectionItem(BaseModel):
     """Base for report row types. Unknown keys from the LLM are dropped."""
 
     model_config = ConfigDict(extra="ignore", str_strip_whitespace=True)
+
+    # The row's primary key, present only on the way *out*. It is what the
+    # client joins evidence to: sections are returned as flat lists and
+    # nesting evidence inside them would change five response shapes.
+    #
+    # Excluded from the prompt, because a model asked for an `id` will invent
+    # one, and excluded from `storage_dump()`, because the database assigns it.
+    id: uuid.UUID | None = None
+    # The chunk indices the model says this finding came from. **Not a column**
+    # — evidence lives in its own table, keyed by (report, section, item).
+    evidence: Evidence = Field(default_factory=list)
 
     def is_empty(self) -> bool:
         """True when no field carries a value.
@@ -61,8 +113,36 @@ class SectionItem(BaseModel):
         verbatim instead of extracting anything, which would otherwise store a
         row of nulls and report the section as a success — the exact
         looks-fine-but-empty failure this rebuild exists to remove.
+
+        `evidence` is excluded from the emptiness test on purpose: a finding
+        with citations and no content is still the empty skeleton, and letting
+        a stray `"evidence": [0]` rescue it would reopen exactly that hole.
         """
-        return all(value is None for value in self.model_dump().values())
+        return all(value is None for value in self.storage_dump().values())
+
+    def storage_dump(self) -> dict:
+        """The fields that are columns and that this layer supplies.
+
+        Field names match ORM column names one-for-one — that is the guarantee
+        `TestSchemaAlignment` enforces and the prototype's #1 bug. The two
+        exceptions are subtracted *here* rather than at the call site, so no
+        storage code ever names a field as a string literal.
+        """
+        return self.model_dump(exclude=STORAGE_EXCLUDED)
+
+
+# The three exclusion sets, defined once because they are not the same set and
+# conflating them causes three different bugs.
+#
+# `evidence` is a schema field with no column: it lives in `finding_evidence`.
+# `id` is a column the database assigns: showing it to the model invites an
+# invented uuid, and handing it back to `Model(**...)` as an explicit None
+# fights the column default.
+EVIDENCE_FIELD = "evidence"
+ID_FIELD = "id"
+NON_COLUMN_FIELDS = {EVIDENCE_FIELD}
+STORAGE_EXCLUDED = {EVIDENCE_FIELD, ID_FIELD}
+PROMPT_EXCLUDED = {ID_FIELD}
 
 
 # --- Row types (field names == DB column names) ---------------------------
@@ -223,6 +303,16 @@ class ReportGenerationResult(BaseModel):
     # the section latencies: they run at the same time, so summing them would
     # report roughly five times the elapsed time.
     generation_ms: float | None = None
+    # Resolved citations, ready for `finding_evidence`. Typed loosely because
+    # `services/grounding.EvidenceRecord` is a dataclass and importing it here
+    # would make the schema module depend on a service.
+    evidence: list = Field(default_factory=list)
+    # Findings the model could not source, and citations it made up. Both are
+    # counted rather than hidden: they are the numbers Phase 11 measures, and a
+    # report that quietly drops them would score perfectly by having nothing
+    # left to be wrong about.
+    ungrounded_findings: int = 0
+    invalid_citations: int = 0
 
     @property
     def partial(self) -> bool:
@@ -339,12 +429,39 @@ class ReportSummary(BaseModel):
     integrity_checked_at: datetime | None = None
 
 
+class EvidenceItem(BaseModel):
+    """One citation, as the UI receives it.
+
+    `item_id` is the primary key of the section row this evidence belongs to,
+    which is how the client joins evidence to findings without the server
+    having to nest one inside the other — the sections are already returned as
+    flat lists and nesting would change five response shapes.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    evidence_id: uuid.UUID
+    section: str
+    item_id: uuid.UUID
+    chunk_id: int
+    row_start: int | None = None
+    row_end: int | None = None
+    line_start: int | None = None
+    line_end: int | None = None
+    excerpt: str
+
+
 class ReportDetail(ReportSummary):
     sections: ReportSections
     errors: list[SectionError] = Field(default_factory=list)
     # The source document's SHA-256 as it was when this report was generated.
     file_hash: str | None = None
     threat_intel: list[ThreatIntelItem] = Field(default_factory=list)
+    # Every resolved citation in the report, flat. A finding with none is
+    # ungrounded — flagged by absence, never dropped.
+    evidence: list[EvidenceItem] = Field(default_factory=list)
+    ungrounded_findings: int | None = None
+    invalid_citations: int | None = None
 
 
 class StoreGeneratedReportRequest(BaseModel):
@@ -382,6 +499,10 @@ def json_skeleton(model: type[BaseModel]) -> str:
 def _skeleton_value(model: type[BaseModel]) -> dict:
     skeleton: dict = {}
     for name, field in model.model_fields.items():
+        if name in PROMPT_EXCLUDED:
+            # Never shown to the model. A field it is shown is a field it will
+            # fill in, and an invented primary key is worse than a missing one.
+            continue
         annotation = field.annotation
         origin_args = getattr(annotation, "__args__", ())
         item_model = next(
@@ -392,10 +513,17 @@ def _skeleton_value(model: type[BaseModel]) -> dict:
             ),
             None,
         )
-        skeleton[name] = [_skeleton_value(item_model)] if item_model else None
+        if name == EVIDENCE_FIELD:
+            # Shown as a list of numbers rather than the usual `null`, because
+            # this is the one field where the skeleton has to teach a *shape*.
+            # A model told `"evidence": null` will faithfully return null, and
+            # every finding in the report comes back ungrounded.
+            skeleton[name] = [0]
+        else:
+            skeleton[name] = [_skeleton_value(item_model)] if item_model else None
     return skeleton
 
 
 def field_list(model: type[BaseModel]) -> str:
     """Comma-separated field names, for the "Include only:" prompt line."""
-    return ", ".join(model.model_fields)
+    return ", ".join(name for name in model.model_fields if name not in PROMPT_EXCLUDED)
