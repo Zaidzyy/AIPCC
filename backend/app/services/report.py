@@ -25,15 +25,19 @@ import asyncio
 import json
 import logging
 import re
+import time
 from dataclasses import dataclass, field
 
 from pydantic import BaseModel, ValidationError
 
+from app.core.correlation import get_correlation_id
+from app.core.tracing import get_tracer
 from app.schemas.report import (
     AnomalyItem,
     AnomalySection,
     AttackTypeItem,
     AttackTypeSection,
+    LlmCallRecord,
     ReportGenerationResult,
     ReportSections,
     RiskAssessmentItem,
@@ -49,6 +53,7 @@ from app.schemas.report import (
 from app.services.llm import LLMError, LLMProvider, get_llm_provider
 
 logger = logging.getLogger(__name__)
+tracer = get_tracer(__name__)
 
 RETRIEVAL_K = 5
 
@@ -228,17 +233,26 @@ def retrieve_context(spec: SectionSpec, document_id: str) -> str:
     """Fetch the chunks relevant to this section, scoped to one document."""
     from app.services.rag.vectorstore import get_vectorstore
 
-    store = get_vectorstore()
-    chunks: list[str] = []
-    seen: set[str] = set()
-    for query in spec.queries:
-        for doc in store.similarity_search(
-            query, k=spec.retrieval_k, filter={"document_id": str(document_id)}
-        ):
-            if doc.page_content not in seen:
-                seen.add(doc.page_content)
-                chunks.append(doc.page_content)
-    return "\n--\n".join(chunks)
+    with tracer.start_as_current_span("rag.retrieve") as span:
+        span.set_attribute("rag.section", spec.name)
+        span.set_attribute("rag.k", spec.retrieval_k)
+        span.set_attribute("rag.queries", len(spec.queries))
+
+        store = get_vectorstore()
+        chunks: list[str] = []
+        seen: set[str] = set()
+        for query in spec.queries:
+            for doc in store.similarity_search(
+                query, k=spec.retrieval_k, filter={"document_id": str(document_id)}
+            ):
+                if doc.page_content not in seen:
+                    seen.add(doc.page_content)
+                    chunks.append(doc.page_content)
+
+        # The count and the size, never the content — a span goes to a
+        # collector, and log data does not leave this system that way.
+        span.set_attribute("rag.chunks", len(chunks))
+        return "\n--\n".join(chunks)
 
 
 # --- Section generation ---------------------------------------------------
@@ -249,6 +263,10 @@ class SectionOutcome:
     name: str
     items: list = field(default_factory=list)
     error: SectionError | None = None
+    # Every call this section made, including the repair retry. Carried out of
+    # here rather than written here: the generator has never touched the
+    # database and does not start now.
+    usage: list[LlmCallRecord] = field(default_factory=list)
 
 
 async def generate_section(
@@ -257,30 +275,65 @@ async def generate_section(
     provider: LLMProvider,
 ) -> SectionOutcome:
     """Generate one section: retrieve, prompt, parse, validate, retry once."""
-    try:
-        context = await asyncio.to_thread(retrieve_context, spec, document_id)
-    except Exception as exc:
-        logger.exception("retrieval failed for section %s", spec.name)
-        return SectionOutcome(
-            spec.name,
-            error=SectionError(
-                section=spec.name, stage="llm", detail=f"retrieval failed: {exc}"
-            ),
-        )
+    usage: list[LlmCallRecord] = []
 
-    if not context.strip():
-        return SectionOutcome(
-            spec.name,
-            error=SectionError(
-                section=spec.name,
-                stage="llm",
-                detail=(
-                    f"no indexed content for document {document_id}. "
-                    "Has it been ingested?"
+    with tracer.start_as_current_span("report.section") as span:
+        span.set_attribute("section.name", spec.name)
+
+        try:
+            context = await asyncio.to_thread(retrieve_context, spec, document_id)
+        except Exception as exc:
+            logger.exception("retrieval failed for section %s", spec.name)
+            return SectionOutcome(
+                spec.name,
+                error=SectionError(
+                    section=spec.name, stage="llm", detail=f"retrieval failed: {exc}"
                 ),
-            ),
-        )
+            )
 
+        if not context.strip():
+            return SectionOutcome(
+                spec.name,
+                error=SectionError(
+                    section=spec.name,
+                    stage="llm",
+                    detail=(
+                        f"no indexed content for document {document_id}. "
+                        "Has it been ingested?"
+                    ),
+                ),
+            )
+
+        return await _attempt_section(spec, provider, context, usage, span)
+
+
+def _record(
+    usage: list[LlmCallRecord], spec: SectionSpec, result, attempt: int, succeeded: bool
+) -> None:
+    usage.append(
+        LlmCallRecord(
+            section=spec.name,
+            provider=result.provider,
+            model=result.model,
+            attempt=attempt,
+            succeeded=succeeded,
+            prompt_tokens=result.usage.prompt_tokens,
+            completion_tokens=result.usage.completion_tokens,
+            total_tokens=result.usage.total_tokens,
+            latency_ms=result.latency_ms,
+            cost_usd=result.cost_usd,
+            correlation_id=get_correlation_id(),
+        )
+    )
+
+
+async def _attempt_section(
+    spec: SectionSpec,
+    provider: LLMProvider,
+    context: str,
+    usage: list[LlmCallRecord],
+    span,
+) -> SectionOutcome:
     prompt = build_prompt(spec, context)
     raw = ""
     last_error = ""
@@ -288,13 +341,25 @@ async def generate_section(
 
     for attempt in (1, 2):
         try:
-            raw = await provider.complete(prompt)
+            result = await provider.generate(prompt)
         except LLMError as exc:
-            # A provider failure is not repairable by re-prompting.
+            # A provider failure is not repairable by re-prompting. No usage
+            # row either: the call never reached the model, so it has no
+            # tokens, and inventing zeros would drag every average down with
+            # calls that never happened.
+            span.set_attribute("section.failed", True)
             return SectionOutcome(
                 spec.name,
                 error=SectionError(section=spec.name, stage="llm", detail=str(exc)),
+                usage=usage,
             )
+
+        raw = result.text
+        # Recorded before the response is judged. A call that produced
+        # unusable JSON still spent its tokens, and a cost figure that counted
+        # only the calls that worked would understate exactly the reports that
+        # went wrong most expensively.
+        _record(usage, spec, result, attempt, succeeded=True)
 
         try:
             payload = extract_json(raw)
@@ -318,17 +383,19 @@ async def generate_section(
                         "validation",
                     )
                 else:
-                    return SectionOutcome(spec.name, items=items)
+                    span.set_attribute("section.items", len(items))
+                    span.set_attribute("section.attempts", attempt)
+                    return SectionOutcome(spec.name, items=items, usage=usage)
 
         if attempt == 1:
             logger.warning(
-                "section %s failed (%s), retrying with repair prompt: %s",
-                spec.name,
-                last_stage,
-                last_error,
+                "section failed, retrying with repair prompt",
+                extra={"section": spec.name, "stage": last_stage, "reason": last_error},
             )
+            span.set_attribute("section.retried", True)
             prompt = build_repair_prompt(spec, raw, last_error)
 
+    span.set_attribute("section.failed", True)
     return SectionOutcome(
         spec.name,
         error=SectionError(
@@ -337,6 +404,7 @@ async def generate_section(
             detail=f"failed after retry: {last_error}",
             raw_output=raw[:2000] if raw else None,
         ),
+        usage=usage,
     )
 
 
@@ -358,31 +426,71 @@ async def generate_report(
     document_id: str,
     provider: LLMProvider | None = None,
 ) -> ReportGenerationResult:
-    """Generate every section concurrently."""
+    """Generate every section concurrently.
+
+    The span opened here is the parent of five `report.section` spans, each
+    with its own `llm.complete` child. Those five overlap in wall-clock time,
+    and that overlap is the visual proof that the concurrency this project has
+    claimed since Phase 1 is real — asserted in
+    `tests/test_observability.py::TestTracing`, so it is checked rather than
+    admired.
+    """
     provider = provider or get_llm_provider()
 
-    outcomes = await asyncio.gather(
-        *(generate_section(spec, document_id, provider) for spec in SECTION_SPECS),
-        return_exceptions=True,
-    )
+    with tracer.start_as_current_span("report.generate") as span:
+        span.set_attribute("report.document_id", str(document_id))
+        span.set_attribute("report.sections", len(SECTION_SPECS))
+        started = time.perf_counter()
 
-    sections = ReportSections()
-    errors: list[SectionError] = []
+        outcomes = await asyncio.gather(
+            *(generate_section(spec, document_id, provider) for spec in SECTION_SPECS),
+            return_exceptions=True,
+        )
 
-    for spec, outcome in zip(SECTION_SPECS, outcomes, strict=True):
-        if isinstance(outcome, BaseException):
-            logger.exception("section %s raised", spec.name, exc_info=outcome)
-            errors.append(
-                SectionError(
-                    section=spec.name,
-                    stage="llm",
-                    detail=f"unexpected error: {outcome}",
+        sections = ReportSections()
+        errors: list[SectionError] = []
+        usage: list[LlmCallRecord] = []
+
+        for spec, outcome in zip(SECTION_SPECS, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                logger.exception("section raised", extra={"section": spec.name}, exc_info=outcome)
+                errors.append(
+                    SectionError(
+                        section=spec.name,
+                        stage="llm",
+                        detail=f"unexpected error: {outcome}",
+                    )
                 )
-            )
-            continue
-        if outcome.error:
-            errors.append(outcome.error)
-        else:
-            setattr(sections, spec.name, outcome.items)
+                continue
+            usage.extend(outcome.usage)
+            if outcome.error:
+                errors.append(outcome.error)
+            else:
+                setattr(sections, spec.name, outcome.items)
 
-    return ReportGenerationResult(sections=sections, errors=errors)
+        # Wall-clock, not the sum of the section latencies. They ran at the
+        # same time; summing them would report about five times the truth.
+        generation_ms = round((time.perf_counter() - started) * 1000, 2)
+
+        costs = [record.cost_usd for record in usage if record.cost_usd is not None]
+        span.set_attribute("report.generation_ms", generation_ms)
+        span.set_attribute("report.llm_calls", len(usage))
+        span.set_attribute("report.failed_sections", len(errors))
+        if costs:
+            span.set_attribute("report.cost_usd", sum(costs))
+
+        logger.info(
+            "report generated",
+            extra={
+                "document_id": str(document_id),
+                "sections_ok": len(SECTION_SPECS) - len(errors),
+                "sections_failed": len(errors),
+                "llm_calls": len(usage),
+                "generation_ms": generation_ms,
+                "cost_usd": sum(costs) if costs else None,
+            },
+        )
+
+        return ReportGenerationResult(
+            sections=sections, errors=errors, usage=usage, generation_ms=generation_ms
+        )

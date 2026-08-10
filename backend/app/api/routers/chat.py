@@ -123,7 +123,7 @@ async def send_message(
     db.refresh(user_message)
 
     try:
-        reply, chunks = await answer(payload.message, documents, history)
+        reply, chunks, usage = await answer(payload.message, documents, history)
     except LLMError as exc:
         # Record the failed turn so the conversation shows what happened
         # instead of silently dropping the question.
@@ -135,6 +135,10 @@ async def send_message(
         chat_id=chat.chat_id, role="assistant", context=reply, status="complete"
     )
     db.add(assistant_message)
+    # Chat spend lands in the same table as report spend, with no `report_id`.
+    # Excluding it would leave "what does this system cost to run" quietly
+    # missing a whole feature.
+    db.add(models.LlmUsage(user_id=user.user_id, **usage.model_dump()))
     db.commit()
     db.refresh(assistant_message)
 

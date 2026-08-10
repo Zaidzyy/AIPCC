@@ -22,6 +22,8 @@ import logging
 import uuid
 from dataclasses import dataclass
 
+from app.core.correlation import get_correlation_id
+from app.schemas.report import LlmCallRecord
 from app.services.llm import LLMProvider, get_llm_provider
 
 logger = logging.getLogger(__name__)
@@ -150,19 +152,41 @@ async def answer(
     documents: list[tuple[uuid.UUID, str]],
     history: list[ChatTurn],
     provider: LLMProvider | None = None,
-) -> tuple[str, list[RetrievedChunk]]:
-    """Answer `question`, returning the reply and the chunks it was grounded in.
+) -> tuple[str, list[RetrievedChunk], LlmCallRecord]:
+    """Answer `question`, returning the reply, its sources, and what it cost.
 
     Raises `LLMError` if the provider fails — the caller decides what that means
     for the stored conversation.
+
+    The usage record is returned rather than written here, for the same reason
+    nothing else in this module touches the database: `answer` takes plain
+    values and returns plain values, so it is testable with neither Postgres
+    nor Chroma. Chat is included in the accounting at all because leaving it
+    out would make "what does this system cost to run" quietly exclude a whole
+    feature.
     """
     provider = provider or get_llm_provider()
 
     import asyncio
 
     chunks = await asyncio.to_thread(retrieve_chunks, question, documents)
-    reply = await provider.complete(build_prompt(question, chunks, history))
-    return reply.strip(), chunks
+    result = await provider.generate(build_prompt(question, chunks, history))
+
+    return (
+        result.text.strip(),
+        chunks,
+        LlmCallRecord(
+            section="chat",
+            provider=result.provider,
+            model=result.model,
+            prompt_tokens=result.usage.prompt_tokens,
+            completion_tokens=result.usage.completion_tokens,
+            total_tokens=result.usage.total_tokens,
+            latency_ms=result.latency_ms,
+            cost_usd=result.cost_usd,
+            correlation_id=get_correlation_id(),
+        ),
+    )
 
 
 def derive_chat_name(first_message: str, limit: int = 60) -> str:

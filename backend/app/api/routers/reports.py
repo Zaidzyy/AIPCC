@@ -56,6 +56,8 @@ async def generate_report_endpoint(
         classification=payload.classification,
         sections=result.sections,
         errors=result.errors,
+        usage=result.usage,
+        generation_ms=result.generation_ms,
     )
 
     # Recorded before the 502 below, so a generation that produced nothing is
@@ -76,6 +78,8 @@ async def generate_report_endpoint(
             "status": report.status,
             "origin": "app",
             "section_errors": len(result.errors),
+            "cost_usd": report.total_cost_usd,
+            "total_tokens": report.total_tokens,
         },
     )
 

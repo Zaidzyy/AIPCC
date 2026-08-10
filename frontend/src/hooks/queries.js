@@ -33,6 +33,10 @@ export const keys = {
   dashboardSeverity: ["dashboard", "severity"],
   dashboardAttacks: (limit) => ["dashboard", "top-attack-types", limit],
   dashboardAnomalies: (days) => ["dashboard", "anomalies-over-time", days],
+  dashboardUsage: ["dashboard", "usage-summary"],
+  dashboardCost: (days) => ["dashboard", "cost-over-time", days],
+  dashboardTokens: ["dashboard", "tokens-by-section"],
+  dashboardLatency: (days) => ["dashboard", "generation-latency", days],
   alerts: ["alerts"],
   alertList: (status) => ["alerts", status ?? "all"],
   // The filter set is part of the key: /audit?action=auth.login.failure and
@@ -127,6 +131,36 @@ export function useAnomaliesOverTime(days) {
   return useQuery({
     queryKey: keys.dashboardAnomalies(days),
     queryFn: () => dashboardApi.anomaliesOverTime(days),
+  });
+}
+
+// --- Cost accounting (Phase 9) -------------------------------------------
+//
+// Under `keys.dashboard`, so generating a report invalidates these along with
+// every other aggregate — a new report changes what the system has spent.
+
+export function useUsageSummary() {
+  return useQuery({ queryKey: keys.dashboardUsage, queryFn: dashboardApi.usageSummary });
+}
+
+export function useCostOverTime(days) {
+  return useQuery({
+    queryKey: keys.dashboardCost(days),
+    queryFn: () => dashboardApi.costOverTime(days),
+  });
+}
+
+export function useTokensBySection() {
+  return useQuery({
+    queryKey: keys.dashboardTokens,
+    queryFn: dashboardApi.tokensBySection,
+  });
+}
+
+export function useGenerationLatency(days) {
+  return useQuery({
+    queryKey: keys.dashboardLatency(days),
+    queryFn: () => dashboardApi.generationLatency(days),
   });
 }
 

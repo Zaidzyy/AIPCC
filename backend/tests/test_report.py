@@ -21,7 +21,7 @@ from app.schemas.report import (
     ReportSections,
     json_skeleton,
 )
-from app.services.llm.base import LLMError, LLMProvider, extract_text
+from app.services.llm.base import LLMError, LLMProvider, Usage, extract_text
 from app.services.report import (
     SECTION_SPECS,
     SECTION_SPECS_BY_NAME,
@@ -40,16 +40,35 @@ from app.services.report_storage import (
 
 
 class FakeProvider(LLMProvider):
-    """Returns canned responses in order; records every prompt it saw."""
+    """Returns canned responses in order; records every prompt it saw.
+
+    Implements `_invoke`, not `complete`. Phase 9 moved the timing, token
+    accounting and tracing into the base class's `generate()`, so a fake that
+    overrode the public method would skip all three and the usage assertions
+    would be testing nothing. Overriding the one abstract method is what keeps
+    a test provider on the same measured path as a real one.
+
+    The token counts are fixed and deliberately asymmetric, so a test that
+    swaps prompt and completion tokens fails instead of coincidentally passing.
+    """
 
     name = "fake"
+    model = "fake-model"
 
-    def __init__(self, *responses: str | Exception, delay: float = 0.0):
+    def __init__(
+        self,
+        *responses: str | Exception,
+        delay: float = 0.0,
+        usage: Usage | None = None,
+    ):
         self._responses = list(responses)
         self.prompts: list[str] = []
         self.delay = delay
+        self.usage = usage if usage is not None else Usage(
+            prompt_tokens=100, completion_tokens=20
+        )
 
-    async def complete(self, prompt: str) -> str:
+    async def _invoke(self, prompt: str) -> tuple[str, Usage]:
         self.prompts.append(prompt)
         if self.delay:
             await asyncio.sleep(self.delay)
@@ -58,7 +77,7 @@ class FakeProvider(LLMProvider):
         response = self._responses.pop(0)
         if isinstance(response, Exception):
             raise response
-        return response
+        return response, self.usage
 
 
 VALID_ATTACK_JSON = """{
@@ -313,11 +332,11 @@ class TestFullReport:
     def test_sections_run_concurrently(self, no_retrieval, monkeypatch):
         """Five 0.1s calls must take ~0.1s total, not ~0.5s."""
 
-        async def fake_complete(self, prompt):
+        async def fake_invoke(self, prompt):
             await asyncio.sleep(0.1)
-            return _valid_for_prompt(prompt)
+            return _valid_for_prompt(prompt), self.usage
 
-        monkeypatch.setattr(FakeProvider, "complete", fake_complete)
+        monkeypatch.setattr(FakeProvider, "_invoke", fake_invoke)
         provider = FakeProvider()
 
         async def run():
@@ -331,12 +350,12 @@ class TestFullReport:
         assert elapsed < 0.35, f"sections appear serial: {elapsed:.2f}s for 5x0.1s"
 
     def test_one_bad_section_does_not_sink_the_report(self, no_retrieval, monkeypatch):
-        async def fake_complete(self, prompt):
+        async def fake_invoke(self, prompt):
             if "attack_types" in prompt:
-                return "garbage"
-            return _valid_for_prompt(prompt)
+                return "garbage", self.usage
+            return _valid_for_prompt(prompt), self.usage
 
-        monkeypatch.setattr(FakeProvider, "complete", fake_complete)
+        monkeypatch.setattr(FakeProvider, "_invoke", fake_invoke)
         result = asyncio.run(generate_report("doc-1", FakeProvider()))
 
         assert [e.section for e in result.errors] == ["attack_types"]

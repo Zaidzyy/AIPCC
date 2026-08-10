@@ -14,6 +14,7 @@ import uuid
 
 import pytest
 
+from app.schemas.report import LlmCallRecord
 from app.services.chatbot import (
     ChatTurn,
     RetrievedChunk,
@@ -22,23 +23,29 @@ from app.services.chatbot import (
     derive_chat_name,
     retrieve_chunks,
 )
-from app.services.llm.base import LLMError, LLMProvider
+from app.services.llm.base import LLMError, LLMProvider, Usage
 
 
 class FakeProvider(LLMProvider):
-    """Returns one canned response; records the prompt it saw."""
+    """Returns one canned response; records the prompt it saw.
+
+    Overrides `_invoke`, not `complete` — see the note on the equivalent fake
+    in `test_report.py`. Overriding the public method would bypass the timing
+    and token accounting that Phase 9 put in the base class.
+    """
 
     name = "fake"
+    model = "fake-model"
 
     def __init__(self, response: str | Exception = "An answer."):
         self._response = response
         self.prompts: list[str] = []
 
-    async def complete(self, prompt: str) -> str:
+    async def _invoke(self, prompt: str) -> tuple[str, Usage]:
         self.prompts.append(prompt)
         if isinstance(self._response, Exception):
             raise self._response
-        return self._response
+        return self._response, Usage(prompt_tokens=40, completion_tokens=8)
 
 
 class _StubHit:
@@ -128,13 +135,17 @@ class TestChatbotService:
         )
         provider = FakeProvider("  Three failed logins.  ")
 
-        reply, chunks = asyncio.run(
+        reply, chunks, usage = asyncio.run(
             answer("what happened", [(document_id, "auth.log")], [], provider)
         )
 
         assert reply == "Three failed logins."
         assert [c.content for c in chunks] == ["suspicious chunk"]
         assert "suspicious chunk" in provider.prompts[0]
+        # Chat spend is accounted for like report spend — leaving it out would
+        # make "what does this system cost to run" miss a whole feature.
+        assert usage.section == "chat"
+        assert (usage.prompt_tokens, usage.completion_tokens) == (40, 8)
 
     def test_provider_failure_propagates(self, monkeypatch):
         monkeypatch.setattr(
@@ -169,10 +180,20 @@ def fake_answer(monkeypatch):
 
     async def _answer(question, documents, history, provider=None):
         calls.append((question, documents, history))
-        return "A grounded answer.", [
-            RetrievedChunk(doc_id, name, "matched log line")
-            for doc_id, name in documents
-        ]
+        return (
+            "A grounded answer.",
+            [RetrievedChunk(doc_id, name, "matched log line") for doc_id, name in documents],
+            LlmCallRecord(
+                section="chat",
+                provider="fake",
+                model="fake-model",
+                prompt_tokens=40,
+                completion_tokens=8,
+                total_tokens=48,
+                latency_ms=1.0,
+                cost_usd=None,
+            ),
+        )
 
     monkeypatch.setattr("app.api.routers.chat.answer", _answer)
     return calls
