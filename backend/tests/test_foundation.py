@@ -16,6 +16,8 @@ from app.db import models
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 APP_DIR = BACKEND_DIR / "app"
+REPO_ROOT = BACKEND_DIR.parent
+N8N_DIR = REPO_ROOT / "n8n"
 
 # Comments and string literals are masked before scanning. Without this the
 # checks below fire on their own documentation — several modules name the
@@ -121,6 +123,101 @@ class TestHardRules:
         ]
         assert offenders == [], (
             "password_hash assigned without hashing:\n" + "\n".join(offenders)
+        )
+
+
+CREDENTIAL_FIELD = re.compile(r"key|token|secret|auth|password|bearer|apikey", re.I)
+# Long enough to be a real credential rather than an identifier or enum value.
+CREDENTIAL_VALUE = re.compile(r"^[A-Za-z0-9_\-]{32,}$")
+
+
+def find_embedded_credentials(workflow: dict) -> list[str]:
+    """Return "<field>=<masked value>" for anything that looks like a secret.
+
+    A credential is flagged when a field *named* like one holds a long opaque
+    literal. n8n expressions (`={{ ... }}`) and URLs are never secrets, and a
+    credential supplied properly lives under a node's `credentials` block as a
+    reference — never as a literal value.
+    """
+    found: list[str] = []
+
+    def walk(node: object) -> None:
+        if isinstance(node, dict):
+            label = str(node.get("name", ""))
+            for field, value in node.items():
+                if isinstance(value, str) and CREDENTIAL_VALUE.match(value):
+                    if value.startswith(("={{", "http")):
+                        continue
+                    if CREDENTIAL_FIELD.search(field) or CREDENTIAL_FIELD.search(label):
+                        found.append(f"{label or field}={value[:4]}...{value[-4:]}")
+                walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(workflow)
+    return found
+
+
+class TestNoEmbeddedCredentials:
+    """n8n exports carry whatever the exporting instance had inlined.
+
+    The orchestrator arrived with a live AbuseIPDB key as a plain `Key` header
+    and it reached a public repository, because the workflows were reviewed for
+    which endpoints they called and never scanned for secrets. A rule written
+    in a document gets applied when someone remembers; a test applies always.
+    """
+
+    def test_detector_actually_fires(self):
+        """Positive control — a guard that cannot fail protects nothing.
+
+        This is the exact shape the leak had.
+        """
+        planted = {
+            "nodes": [
+                {
+                    "name": "IP Reputation Lookup",
+                    "parameters": {
+                        "headerParameters": {
+                            "parameters": [
+                                {"name": "Key", "value": "a" * 80},
+                                {"name": "Accept", "value": "application/json"},
+                            ]
+                        }
+                    },
+                }
+            ]
+        }
+        assert find_embedded_credentials(planted), "detector missed a planted secret"
+
+    def test_expressions_and_urls_are_not_flagged(self):
+        benign = {
+            "nodes": [
+                {
+                    "name": "Key",
+                    "value": "={{ $json.some_reasonably_long_expression_here }}",
+                },
+                {"name": "url", "value": "https://api.abuseipdb.com/api/v2/check"},
+            ]
+        }
+        assert find_embedded_credentials(benign) == []
+
+    def test_committed_workflows_carry_no_secrets(self):
+        import json
+
+        workflows = sorted(N8N_DIR.glob("*.json"))
+        assert workflows, f"no workflows found at {N8N_DIR}"
+
+        offenders: list[str] = []
+        for path in workflows:
+            hits = find_embedded_credentials(
+                json.loads(path.read_text(encoding="utf-8"))
+            )
+            offenders += [f"{path.name}: {h}" for h in hits]
+
+        assert offenders == [], (
+            "embedded credential in a committed workflow — move it to an n8n "
+            "credential and rotate the exposed value:\n" + "\n".join(offenders)
         )
 
 
