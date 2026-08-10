@@ -1,0 +1,524 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AIPCC — Ingest a log. Get a report you can check.</title>
+<meta name="description" content="An AI cybersecurity co-pilot that writes a five-section incident report — and tells you how much of it to trust. 0.0% hallucination, 100% grounding, measured.">
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --void:#0b0d11; --panel:#14171d; --panel2:#1a1e26; --line:#252b36; --line2:#2f3742;
+  --tx:#e8eaed; --mut:#8b94a5; --mut2:#5d6674;
+  --green:#4ade80; --amber:#fbbf24; --orange:#fb923c; --red:#f87171; --cy:#22d3ee;
+  --mono:'IBM Plex Mono',ui-monospace,Menlo,monospace; --sans:'IBM Plex Sans',ui-sans-serif,system-ui,sans-serif;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{background:var(--void);color:var(--tx);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+body.locked{overflow:hidden}
+.wrap{max-width:1200px;margin:0 auto;padding:0 26px;position:relative;z-index:2}
+a{color:inherit;text-decoration:none}::selection{background:rgba(74,222,128,.25)}
+code{font-family:var(--mono);color:var(--green);font-size:.92em}
+
+/* ── ENTER GATE ─────────────────────────────────────── */
+#gate{position:fixed;inset:0;z-index:200;background:#050608;display:flex;align-items:center;justify-content:center;
+  flex-direction:column;transition:opacity .9s ease,visibility .9s}
+#gate.out{opacity:0;visibility:hidden;pointer-events:none}
+#seal{display:block}
+.gmark{position:absolute;font-family:var(--mono);font-size:11px;letter-spacing:.34em;text-transform:uppercase;
+  color:var(--mut2);top:46px;left:50%;transform:translateX(-50%);opacity:0;animation:gi .8s .2s forwards;text-align:center;padding:0 20px}
+.gfoot{position:absolute;bottom:46px;left:50%;transform:translateX(-50%);font-family:var(--mono);font-size:10.5px;
+  letter-spacing:.2em;color:var(--mut2);opacity:0;animation:gi .8s .7s forwards;text-align:center}
+@keyframes gi{to{opacity:1}}
+.enter{margin-top:38px;font-family:var(--mono);font-size:12.5px;letter-spacing:.26em;text-transform:uppercase;
+  color:var(--green);border:1px solid rgba(74,222,128,.4);background:rgba(74,222,128,.06);padding:14px 34px;
+  border-radius:3px;cursor:pointer;opacity:0;transition:background .25s,border-color .25s,letter-spacing .25s;
+  animation:gi .7s 1.45s forwards}
+.enter:hover{background:rgba(74,222,128,.14);border-color:var(--green);letter-spacing:.3em}
+.enter:active{transform:scale(.98)}
+#flash{position:fixed;inset:0;z-index:210;background:#eafff2;opacity:0;pointer-events:none}
+
+#site{opacity:0;transition:opacity 1s ease .12s}
+#site.in{opacity:1}
+
+nav{position:fixed;top:0;left:0;right:0;z-index:60;backdrop-filter:blur(12px);background:rgba(11,13,17,.82);
+  border-bottom:1px solid var(--line);transform:translateY(-100%);transition:transform .7s cubic-bezier(.2,.7,.3,1) .45s}
+#site.in nav{transform:none}
+.nav{display:flex;align-items:center;justify-content:space-between;height:57px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--mono);font-size:13.5px;font-weight:600;letter-spacing:.02em}
+.shield{width:16px;height:16px;fill:none;stroke:var(--green);stroke-width:1.8}
+.brand .s{color:var(--mut2);font-weight:400;font-size:10px;letter-spacing:.16em}
+@media(max-width:560px){.brand .s{display:none}}
+.nlinks{display:flex;gap:25px;font-family:var(--mono);font-size:12.5px;color:var(--mut)}
+.nlinks a{transition:color .18s}.nlinks a:hover{color:var(--green)}
+@media(max-width:820px){.nlinks a:not(.gh){display:none}}
+
+header{padding:142px 0 88px}
+.hg{display:grid;grid-template-columns:1.03fr .97fr;gap:52px;align-items:center}
+@media(max-width:1020px){.hg{grid-template-columns:1fr;gap:44px}}
+.kick{display:inline-flex;align-items:center;gap:9px;font-family:var(--mono);font-size:11px;letter-spacing:.16em;
+  text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.28);background:rgba(74,222,128,.055);
+  padding:6px 12px;border-radius:3px;margin-bottom:26px}
+.dot{width:5px;height:5px;border-radius:50%;background:var(--green);animation:pu 2.2s ease-in-out infinite}
+@keyframes pu{0%,100%{opacity:1;box-shadow:0 0 0 0 rgba(74,222,128,.5)}50%{opacity:.5;box-shadow:0 0 0 6px rgba(74,222,128,0)}}
+h1{font-size:clamp(2.7rem,6vw,4.4rem);line-height:1.04;letter-spacing:-.035em;font-weight:700}
+h1 .m{font-family:var(--mono);font-weight:500;color:var(--green)}
+.sub{margin-top:22px;font-size:1.1rem;color:var(--mut);max-width:53ch}
+.sub b{color:var(--tx);font-weight:600}
+.cta{display:flex;gap:11px;margin-top:32px;flex-wrap:wrap}
+.btn{font-family:var(--mono);font-size:13px;padding:11.5px 19px;border-radius:4px;border:1px solid var(--line2);
+  color:var(--tx);transition:.18s;display:inline-flex;align-items:center;gap:8px}
+.btn:hover{border-color:rgba(74,222,128,.5);color:var(--green);transform:translateY(-1px)}
+.btn.pri{background:var(--green);color:#062012;border-color:var(--green);font-weight:600}
+.btn.pri:hover{background:#86efac;color:#062012;box-shadow:0 10px 28px -10px rgba(74,222,128,.5)}
+.chips{display:flex;gap:8px;margin-top:28px;flex-wrap:wrap}
+.chip{font-family:var(--mono);font-size:11px;color:var(--mut);border:1px solid var(--line);padding:5px 10px;border-radius:3px;background:var(--panel)}
+.chip b{color:var(--green);font-weight:600}
+
+.con{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden;
+  box-shadow:0 34px 76px -30px rgba(0,0,0,.92)}
+.cbar{display:flex;align-items:center;gap:7px;padding:10px 14px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.014)}
+.tl{width:9px;height:9px;border-radius:50%;background:#2b323e}
+.ctit{font-family:var(--mono);font-size:11.5px;color:var(--mut2);margin-left:6px}
+@media(max-width:420px){.ctit{display:none}}
+.livep{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--green);border:1px solid rgba(74,222,128,.3);padding:3px 8px;border-radius:3px;letter-spacing:.11em}
+.cbody{padding:15px 15px 17px;font-family:var(--mono);font-size:12.2px;min-height:428px}
+.ln{color:var(--mut);margin-bottom:8px;opacity:0;animation:fi .28s forwards}
+@keyframes fi{to{opacity:1}}
+.ln .g{color:var(--green)}.ln .a{color:var(--amber)}.ln .w{color:var(--tx)}.ln .c{color:var(--cy)}
+.secs{margin:11px 0 3px;border-top:1px solid var(--line);padding-top:11px}
+.sec{display:flex;align-items:center;gap:9px;padding:6px 0;opacity:0;animation:fi .28s forwards}
+.sec .nm{color:var(--mut);flex:1}.sec .st{font-size:10.5px;letter-spacing:.04em}
+.sec .tm{color:var(--mut2);font-size:10.5px;min-width:48px;text-align:right}
+.spin{width:9px;height:9px;border:1.5px solid rgba(139,148,165,.25);border-top-color:var(--mut);border-radius:50%;animation:sp .7s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.tick{width:9px;height:9px;border-radius:50%;background:var(--green);box-shadow:0 0 7px rgba(74,222,128,.55);flex:none}
+.warn{width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 7px rgba(251,191,36,.55);flex:none}
+.find{margin-top:12px;border:1px solid var(--line);border-left:2px solid var(--orange);border-radius:5px;padding:11px;background:rgba(255,255,255,.015);opacity:0;animation:fi .36s forwards}
+.find.amb{border-left-color:var(--amber);background:rgba(251,191,36,.03)}
+.ftop{display:flex;align-items:center;gap:7px;margin-bottom:6px;flex-wrap:wrap}
+.tag{font-size:9.5px;padding:2.5px 6.5px;border-radius:3px;letter-spacing:.06em;font-weight:600}
+.tag.hi{background:rgba(251,146,60,.13);color:var(--orange);border:1px solid rgba(251,146,60,.3)}
+.tag.id{background:rgba(255,255,255,.05);color:var(--mut);border:1px solid var(--line2)}
+.tag.am{background:rgba(251,191,36,.13);color:var(--amber);border:1px solid rgba(251,191,36,.32)}
+.ftitle{color:var(--tx);font-size:12.2px;font-weight:500}
+.cite{margin-top:8px;padding-top:8px;border-top:1px dashed var(--line);color:var(--mut2);font-size:10.5px}
+.cite b{color:var(--green);font-weight:500}
+.raw{margin-top:6px;color:var(--mut2);font-size:10px;line-height:1.72;background:rgba(0,0,0,.34);border-radius:3px;padding:7px 9px;white-space:pre-wrap;word-break:break-all}
+.sealed{margin-top:12px;border:1px solid rgba(74,222,128,.22);background:rgba(74,222,128,.05);border-radius:5px;padding:11px;opacity:0;animation:fi .36s forwards}
+.sealed .h{display:flex;align-items:center;justify-content:space-between;font-size:10px;letter-spacing:.13em;color:var(--mut);text-transform:uppercase}
+.sbadge{color:var(--green);border:1px solid rgba(74,222,128,.35);padding:2px 7px;border-radius:3px;font-size:9.5px}
+.hash{margin-top:7px;color:var(--mut2);font-size:10px;word-break:break-all;line-height:1.6}
+
+section{padding:94px 0;border-top:1px solid var(--line);position:relative}
+.snum{font-family:var(--mono);font-size:11px;color:var(--green);letter-spacing:.2em;text-transform:uppercase;margin-bottom:17px}
+.snum span{color:var(--mut2)}
+h2{font-size:clamp(1.85rem,3.6vw,2.65rem);letter-spacing:-.03em;line-height:1.14;font-weight:700;max-width:20ch}
+.lede{margin-top:17px;color:var(--mut);font-size:1.04rem;max-width:65ch}
+.lede b{color:var(--tx);font-weight:600}
+.rv{opacity:0;transform:translateY(22px);transition:opacity .66s cubic-bezier(.2,.7,.3,1),transform .66s cubic-bezier(.2,.7,.3,1)}
+.rv.in{opacity:1;transform:none}
+
+.steps{display:grid;grid-template-columns:repeat(5,1fr);gap:1px;margin-top:48px;background:var(--line);border:1px solid var(--line);border-radius:7px;overflow:hidden}
+@media(max-width:960px){.steps{grid-template-columns:repeat(2,1fr)}}
+@media(max-width:520px){.steps{grid-template-columns:1fr}}
+.step{background:var(--panel);padding:23px 19px;transition:background .2s}
+.step:hover{background:var(--panel2)}
+.step .n{font-family:var(--mono);font-size:10.5px;color:var(--green);margin-bottom:13px;letter-spacing:.14em}
+.step h4{font-size:1rem;margin-bottom:8px;font-weight:600}
+.step p{font-size:.862rem;color:var(--mut);line-height:1.6}
+
+.mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-top:48px}
+@media(max-width:900px){.mgrid{grid-template-columns:repeat(2,1fr)}}
+.met{border:1px solid var(--line);border-radius:7px;padding:23px 19px;background:var(--panel);position:relative;overflow:hidden}
+.met::after{content:'';position:absolute;top:0;left:0;right:0;height:1px;background:linear-gradient(90deg,transparent,rgba(74,222,128,.5),transparent)}
+.met .v{font-family:var(--mono);font-size:2.25rem;font-weight:600;letter-spacing:-.045em;line-height:1;color:var(--green)}
+.met .k{font-family:var(--mono);font-size:10px;color:var(--mut2);letter-spacing:.14em;text-transform:uppercase;margin-top:11px}
+.met .d{font-size:.815rem;color:var(--mut);margin-top:7px;line-height:1.55}
+
+.tbl{margin-top:32px;border:1px solid var(--line);border-radius:7px;overflow:hidden;font-family:var(--mono);font-size:12.2px}
+.tr{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:14px;padding:11.5px 18px;border-bottom:1px solid var(--line)}
+.tr:last-child{border-bottom:0}
+.tr.hd{background:rgba(255,255,255,.02);color:var(--mut2);font-size:10px;letter-spacing:.13em;text-transform:uppercase}
+.tr:not(.hd):hover{background:rgba(255,255,255,.014)}
+.tr .l{color:var(--mut)}.tr .lv{color:var(--green)}.tr .rp{color:var(--mut2)}
+@media(max-width:640px){.tr{grid-template-columns:1fr;gap:3px}.tr.hd{display:none}}
+
+.shot{margin-top:44px;border:1px solid var(--line);border-radius:8px;overflow:hidden;background:var(--panel)}
+.shot img{width:100%;display:block}
+.shot .cap{padding:14px 18px;border-top:1px solid var(--line);font-size:.85rem;color:var(--mut);line-height:1.62}
+.shot .cap b{color:var(--tx);font-weight:600}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:22px;margin-top:22px}
+.two .shot{margin-top:0}
+@media(max-width:880px){.two{grid-template-columns:1fr}}
+
+/* ATT&CK matrix */
+.mx{margin-top:48px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:26px;overflow:hidden}
+.mxh{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:12px;margin-bottom:22px}
+.mxh .t{font-family:var(--mono);font-size:11px;letter-spacing:.15em;text-transform:uppercase;color:var(--mut2)}
+.mxh .n{font-family:var(--mono);font-size:12px;color:var(--mut)}
+.mxh .n b{color:var(--green)}
+.grid{display:grid;grid-template-columns:repeat(14,1fr);gap:3px}
+.cell{aspect-ratio:1;border-radius:2px;background:#1c2129;transition:background .5s,box-shadow .3s}
+.cell.l1{background:rgba(74,222,128,.16)}.cell.l2{background:rgba(74,222,128,.32)}
+.cell.l3{background:rgba(74,222,128,.5)}.cell.l4{background:rgba(74,222,128,.72)}
+.cell.bad{background:rgba(251,191,36,.55);box-shadow:0 0 0 1px rgba(251,191,36,.5)}
+@media(max-width:700px){.grid{grid-template-columns:repeat(10,1fr)}}
+.mxleg{display:flex;gap:20px;margin-top:20px;flex-wrap:wrap;font-family:var(--mono);font-size:10.5px;color:var(--mut2)}
+.lg{display:flex;align-items:center;gap:7px}
+.sw{width:10px;height:10px;border-radius:2px}
+.unpl{margin-top:22px;border-top:1px solid var(--line);padding-top:18px;display:grid;gap:10px}
+.unpl .u{display:flex;gap:12px;align-items:flex-start;font-size:.86rem;color:var(--mut);line-height:1.55}
+.unpl .u .id{font-family:var(--mono);color:var(--amber);font-size:11.5px;border:1px solid rgba(251,191,36,.3);padding:2px 7px;border-radius:3px;flex:none}
+
+/* system cards */
+.fg{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;margin-top:48px;background:var(--line);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+@media(max-width:900px){.fg{grid-template-columns:1fr}}
+.fc{background:var(--panel);padding:28px 24px;transition:background .22s}
+.fc:hover{background:var(--panel2)}
+.fc .ic{width:26px;height:26px;stroke:var(--green);fill:none;stroke-width:1.6;margin-bottom:16px}
+.fc h3{font-size:1.06rem;margin-bottom:9px;font-weight:600}
+.fc p{font-size:.878rem;color:var(--mut);line-height:1.62}
+
+.band{border:1px solid var(--line);border-radius:9px;padding:50px 42px;background:var(--panel);text-align:center;position:relative;overflow:hidden}
+.band::before{content:'';position:absolute;top:0;left:50%;transform:translateX(-50%);width:60%;height:1px;background:linear-gradient(90deg,transparent,var(--green),transparent)}
+.band h2{margin:0 auto;max-width:25ch}
+.code{display:inline-block;margin-top:25px;font-family:var(--mono);font-size:12.5px;text-align:left;background:#06080b;border:1px solid var(--line);border-radius:6px;padding:16px 21px;color:var(--mut)}
+.code .g{color:var(--green)}.code .m{color:var(--mut2)}
+footer{padding:42px 0;border-top:1px solid var(--line);font-family:var(--mono);font-size:11.5px;color:var(--mut2)}
+footer .f{display:flex;justify-content:space-between;gap:15px;flex-wrap:wrap}
+footer a:hover{color:var(--green)}
+</style>
+</head>
+<body class="locked">
+
+<!-- ENTER GATE -->
+<div id="gate">
+  <div class="gmark">AI-Powered Cybersecurity Co-Pilot</div>
+  <canvas id="seal" width="360" height="360"></canvas>
+  <button class="enter" id="enterBtn">Enter</button>
+  <div class="gfoot">SHA-256 · SEALED AT GENERATION<br>MIT · BUILT BY ZAID</div>
+</div>
+<div id="flash"></div>
+
+<div id="site">
+
+<nav><div class="wrap nav">
+  <div class="brand">
+    <svg class="shield" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/></svg>
+    AIPCC <span class="s">SECURITY CO-PILOT</span>
+  </div>
+  <div class="nlinks">
+    <a href="#how">how</a><a href="#measured">measured</a><a href="#matrix">att&ck</a><a href="#system">system</a>
+    <a class="gh" href="https://github.com/Zaidzyy/AIPCC">github ↗</a>
+  </div>
+</div></nav>
+
+<header><div class="wrap hg">
+  <div>
+    <div class="kick"><span class="dot"></span>cited · validated · measured</div>
+    <h1>Ingest a log.<br>Get a report<br><span class="m">you can check.</span></h1>
+    <p class="sub">An AI cybersecurity co-pilot that writes a five-section incident report — then tells you
+      <b>how much of it to trust</b>. Every finding cites the log rows it came from. Citations the model
+      invented are <b>flagged, not quietly dropped</b>.</p>
+    <div class="cta">
+      <a class="btn pri" href="https://github.com/Zaidzyy/AIPCC">View on GitHub →</a>
+      <a class="btn" href="#measured">See the numbers ↓</a>
+    </div>
+    <div class="chips">
+      <span class="chip"><b>0.0%</b> hallucination</span><span class="chip"><b>100%</b> grounding</span>
+      <span class="chip"><b>682</b> tests</span><span class="chip"><b>$0.078</b> / report</span>
+    </div>
+  </div>
+  <div class="con">
+    <div class="cbar"><span class="tl"></span><span class="tl"></span><span class="tl"></span>
+      <span class="ctit">generate — edge-firewall-2026-07.csv</span><span class="livep">● SSE</span></div>
+    <div class="cbody" id="cb"></div>
+  </div>
+</div></header>
+
+<section id="how"><div class="wrap">
+  <div class="rv"><div class="snum">01 <span>// how it works</span></div>
+    <h2>Five sections, written concurrently. Each one checked before it is believed.</h2>
+    <p class="lede">The Python generator is authoritative — it owns the canonical schema, the repair retry and the
+      section-error contract. A bad section fails <b>on its own</b> instead of sinking the report.</p></div>
+  <div class="steps rv">
+    <div class="step"><div class="n">01</div><h4>Ingest</h4><p>CSV, JSON, TXT or LOG split deterministically. Row and line provenance is recorded here — the only moment it exists.</p></div>
+    <div class="step"><div class="n">02</div><h4>Retrieve</h4><p>Each section retrieves its own chunks. The chunk key <i>is</i> Chroma's id, so re-ingest upserts instead of duplicating.</p></div>
+    <div class="step"><div class="n">03</div><h4>Generate</h4><p>Attack types, risk, vulnerabilities, anomalies and timeline written at once — each with its own timer, not a shared one.</p></div>
+    <div class="step"><div class="n">04</div><h4>Validate</h4><p>Parsed against one Pydantic schema. Rejected? One repair prompt. Still bad? A typed error — never a silent null.</p></div>
+    <div class="step"><div class="n">05</div><h4>Ground</h4><p>Citations checked against what that section was actually shown. Invented ones are marked in the UI, not deleted.</p></div>
+  </div>
+</div></section>
+
+<section id="measured"><div class="wrap">
+  <div class="rv"><div class="snum">02 <span>// measured, not claimed</span></div>
+    <h2>Most “AI-powered” projects can’t answer how do you know the output is any good.</h2>
+    <p class="lede">Measured <b>2026-08-10</b> against <b>gemini-2.5-flash</b> on a 35-row hand-labelled golden log,
+      scored against real published catalogues — ATT&CK Enterprise v17.1 (823 techniques) and CWE v4.20
+      (969 weaknesses), vendored and checksummed in-repo.</p></div>
+  <div class="mgrid rv">
+    <div class="met"><div class="v" data-n="0.0" data-s="%">0.0%</div><div class="k">Hallucination</div><div class="d">0 of 6 identifiers invented</div></div>
+    <div class="met"><div class="v" data-n="100" data-s="%">100%</div><div class="k">Grounding</div><div class="d">23 of 23 findings cite real content</div></div>
+    <div class="met"><div class="v" data-n="0" data-s="">0</div><div class="k">Fabricated cites</div><div class="d">No claim to have read what it wasn’t shown</div></div>
+    <div class="met"><div class="v" data-n="32.7" data-s="s">32.7s</div><div class="k">Per report</div><div class="d">45,096 tokens · $0.078 · five sections</div></div>
+  </div>
+  <div class="tbl rv">
+    <div class="tr hd"><span>Metric</span><span>Live · gemini-2.5-flash</span><span>CI gate · replayed</span></div>
+    <div class="tr"><span class="l">Hallucination rate</span><span class="lv">0.0% (0/6)</span><span class="rp">75.0% (3/4)</span></div>
+    <div class="tr"><span class="l">Grounding rate</span><span class="lv">100% (23/23)</span><span class="rp">95.7% (22/23)</span></div>
+    <div class="tr"><span class="l">Fabricated citations</span><span class="lv">0</span><span class="rp">5 (17.9%)</span></div>
+    <div class="tr"><span class="l">Precision</span><span class="lv">100%</span><span class="rp">100%</span></div>
+    <div class="tr"><span class="l">Recall — coverage / distinct</span><span class="lv">100% / 55.6%</span><span class="rp">66.7% / 55.6%</span></div>
+    <div class="tr"><span class="l">Section success</span><span class="lv">5 / 5</span><span class="rp">5 / 5</span></div>
+  </div>
+  <p class="lede rv" style="margin-top:22px;font-size:.93rem">The CI cassette is <b>deliberately bad</b>. It replays
+    <code>llama3.1:8b</code>, which fabricated three technique names and cited five chunks it was never given. Those
+    scores aren’t a claim about output quality — they’re a frozen regression test on the <b>validators</b>. A cassette of
+    clean output would prove less: a validator that silently broke would send hallucination to zero and sail through
+    every bound.</p>
+  <div class="shot rv">
+    <img src="images/evaluation.jpg" alt="The in-app Evaluation page showing a REPLAYED badge and four metric tiles" loading="lazy">
+    <div class="cap"><b>The in-app evaluation view.</b> The <code>REPLAYED</code> badge and the amber line beneath it are
+      load-bearing: these figures describe the harness, not a model. The page says so before it shows a single number.</div>
+  </div>
+</div></section>
+
+<section id="matrix"><div class="wrap">
+  <div class="rv"><div class="snum">03 <span>// mitre att&ck</span></div>
+    <h2>A model that names a technique wrong fails in two different ways.</h2>
+    <p class="lede">So it gets two different treatments. Neither is ever silently discarded — that would make the
+      matrix look cleaner than the output behind it.</p></div>
+  <div class="mx rv">
+    <div class="mxh">
+      <span class="t">Enterprise · 14 tactics</span>
+      <span class="n"><b>141</b> detections · <b>15</b> techniques · from 47 reports</span>
+    </div>
+    <div class="grid" id="grid"></div>
+    <div class="mxleg">
+      <span class="lg"><span class="sw" style="background:#1c2129"></span>no detections</span>
+      <span class="lg"><span class="sw" style="background:rgba(74,222,128,.32)"></span>detected</span>
+      <span class="lg"><span class="sw" style="background:rgba(74,222,128,.72)"></span>frequent</span>
+      <span class="lg"><span class="sw" style="background:rgba(251,191,36,.55)"></span>unverified name</span>
+    </div>
+    <div class="unpl">
+      <div class="u"><span class="id">T1022</span><span><b style="color:var(--tx)">Deprecated or revoked in ATT&CK.</b>
+        The model didn’t invent it — MITRE retired it. Scoring that as a hallucination would make the rate climb with the calendar rather than with model behaviour.</span></div>
+      <div class="u"><span class="id">T1888</span><span><b style="color:var(--tx)">Does not exist in ATT&CK Enterprise (823 techniques).</b>
+        There is no column to draw it in, so it is named and counted beside the grid — and excluded from the exported Navigator layer.</span></div>
+    </div>
+  </div>
+  <div class="shot rv">
+    <img src="images/attack-technique-unverified.jpg" alt="Technique dialog showing an unverified name mismatch" loading="lazy">
+    <div class="cap"><b>Real id, wrong name → the cell still draws, marked unverified.</b> The model called
+      <code>T1053</code> “Cron Job Persistence”; the catalogue says “Scheduled Task/Job”. The cell carries
+      <b>the catalogue’s</b> name, never the model’s — rendering the model’s wording onto a matrix cell would print
+      the fabrication as a label.</div>
+  </div>
+</div></section>
+
+<section id="system"><div class="wrap">
+  <div class="rv"><div class="snum">04 <span>// the whole system</span></div>
+    <h2>Around the report sits everything a report generator needs before anyone would use it.</h2></div>
+  <div class="fg rv">
+    <div class="fc"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
+      <h3>Sealed integrity</h3><p>SHA-256 recorded at generation, re-verified on a schedule by the FIM engine. A report with a null hash is filtered out rather than failed — comparing against a null would mark every unsealable report TAMPERED, which is a false accusation, not a finding.</p></div>
+    <div class="fc"><svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a15 15 0 010 18M12 3a15 15 0 000 18"/></svg>
+      <h3>Attack graph</h3><p>20 entities and 12 relationships built from typed columns already stored — no second extraction pass. <code>j.doe</code> is not <code>jdoe</code>: over-merging draws a relationship that was never observed, as confidently as everything else on the canvas.</p></div>
+    <div class="fc"><svg class="ic" viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="10" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>
+      <h3>Auth that holds</h3><p>bcrypt + JWT, ownership scoping that returns <b>404 not 403</b>, constant-shaped login, and a progressive per-account delay instead of a lockout — because the textbook lockout hands anyone a one-request denial of service.</p></div>
+    <div class="fc"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M4 9h16M9 9v11"/></svg>
+      <h3>Append-only audit</h3><p>Every security-relevant action, enforced twice — no endpoint updates or deletes, <i>and</i> a Postgres trigger raises on UPDATE, DELETE and TRUNCATE. The trigger is the one that still holds after someone adds a “clean up old entries” endpoint.</p></div>
+    <div class="fc"><svg class="ic" viewBox="0 0 24 24"><path d="M4 12v7a1 1 0 001 1h14a1 1 0 001-1v-7"/><path d="M12 3v13M8 8l4-4 4 4"/></svg>
+      <h3>Export &amp; share</h3><p>PDF and DOCX walk one document model and never read a report field, so they cannot disagree about content. Share tokens are capabilities, not credentials — hashed, revocable, expiring, classification re-read on every open.</p></div>
+    <div class="fc"><svg class="ic" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M6 8.5v3a2 2 0 002 2h8a2 2 0 002-2v-3"/><path d="M12 13.5v2"/></svg>
+      <h3>n8n automation</h3><p>Orchestrator, FIM engine and DOCX generator — all executed against a running backend with live Groq / AbuseIPDB / VirusTotal credentials. n8n owns <i>when</i> and <i>from where</i>, never <i>what is true</i>: it hands sections to an endpoint that re-validates them.</p></div>
+  </div>
+  <div class="two">
+    <div class="shot rv"><img src="images/attack-graph.jpg" alt="The attack graph with a selected node and its neighbourhood highlighted" loading="lazy">
+      <div class="cap"><b>Selecting a node dims the rest</b> and shows what is actually known about it — its edges, and the findings that touch it, each labelled with <i>why</i> it is attached.</div></div>
+    <div class="shot rv"><img src="images/share-public-view.jpg" alt="The public share view with no navigation and an expiry panel" loading="lazy">
+      <div class="cap"><b>What a link holder sees.</b> No shell, no evidence excerpts, no ungrounded markers — a share grants read of a report, not of the source log.</div></div>
+  </div>
+</div></section>
+
+<section style="border-top:0"><div class="wrap"><div class="band rv">
+  <h2>Clone it. One command. It comes up populated.</h2>
+  <p class="lede" style="margin:15px auto 0">No API key needed to browse — the demo seed creates six weeks of reports
+    without calling a model.</p>
+  <div class="code"><span class="m">$</span> git clone <span class="g">https://github.com/Zaidzyy/AIPCC</span> &amp;&amp; cd AIPCC<br>
+<span class="m">$</span> cp .env.example .env<br><span class="m">$</span> docker compose up<br>
+<span class="m"># → localhost:5173 · admin@aipcc.io / admin</span></div>
+  <div class="cta" style="justify-content:center;margin-top:28px">
+    <a class="btn pri" href="https://github.com/Zaidzyy/AIPCC">Open the repository →</a></div>
+</div></div></section>
+
+<footer><div class="wrap f">
+  <span>© 2026 AIPCC · MIT — built by Zaid</span>
+  <span>Rebuilt from a university group prototype · <a href="https://github.com/Zaidzyy/AIPCC">github.com/Zaidzyy/AIPCC</a></span>
+</div></footer>
+
+</div><!-- /#site -->
+
+<script>
+/* ── GATE ───────────────────────────────────────────── */
+let startConsole=null;
+(function(){
+  const cv=document.getElementById('seal'),ctx=cv.getContext('2d');
+  const D=Math.min(devicePixelRatio||1,2),S=360;
+  cv.width=S*D;cv.height=S*D;cv.style.width=S+'px';cv.style.height=S+'px';ctx.scale(D,D);
+  const cx=S/2,cy=S/2,R=96;
+  const reduce=matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let t=0,raf;
+  const DRAW=0.95;            /* seal outline completes here (was 1.5) */
+  function shieldPath(s){
+    ctx.beginPath();
+    const w=R*.86*s,h=R*1.02*s;
+    ctx.moveTo(cx,cy-h);
+    ctx.lineTo(cx+w,cy-h*.52);
+    ctx.lineTo(cx+w,cy+h*.12);
+    ctx.quadraticCurveTo(cx+w,cy+h*.78,cx,cy+h);
+    ctx.quadraticCurveTo(cx-w,cy+h*.78,cx-w,cy+h*.12);
+    ctx.lineTo(cx-w,cy-h*.52);
+    ctx.closePath();
+  }
+  function frame(){
+    t+=reduce?0.08:0.024;     /* faster boot */
+    ctx.clearRect(0,0,S,S);
+    const p=Math.min(t/DRAW,1), e=1-Math.pow(1-p,3);
+
+    ctx.save();ctx.translate(cx,cy);ctx.rotate(t*.4);
+    for(let i=0;i<48;i++){
+      const a=(i/48)*Math.PI*2, rr=R*1.42, on=(i%4===0);
+      ctx.globalAlpha=(.1+.5*Math.sin(t*1.6+i*.4)*.5+.25)*e;
+      ctx.fillStyle=on?'rgba(74,222,128,.9)':'rgba(139,148,165,.5)';
+      ctx.beginPath();ctx.arc(Math.cos(a)*rr,Math.sin(a)*rr,on?1.7:1,0,6.283);ctx.fill();
+    }
+    ctx.restore();ctx.globalAlpha=1;
+
+    ctx.save();shieldPath(1);
+    ctx.strokeStyle='rgba(74,222,128,'+(.85*e)+')';ctx.lineWidth=1.6;
+    ctx.setLineDash([700,700]);ctx.lineDashOffset=700*(1-e);
+    ctx.shadowColor='rgba(74,222,128,.6)';ctx.shadowBlur=14*e;
+    ctx.stroke();ctx.restore();
+
+    if(p>.55){const q=(p-.55)/.45;ctx.save();shieldPath(1);
+      const g=ctx.createLinearGradient(cx,cy-R,cx,cy+R);
+      g.addColorStop(0,'rgba(74,222,128,'+(.09*q)+')');g.addColorStop(1,'rgba(74,222,128,0)');
+      ctx.fillStyle=g;ctx.fill();ctx.restore();}
+
+    if(p>=1){
+      const q=Math.min((t-DRAW)/.4,1),ee=1-Math.pow(1-q,3);
+      ctx.save();
+      ctx.strokeStyle='rgba(74,222,128,.95)';ctx.lineWidth=3.4;
+      ctx.lineCap='round';ctx.lineJoin='round';
+      ctx.shadowColor='rgba(74,222,128,.7)';ctx.shadowBlur=12;
+      const pts=[[cx-22,cy+2],[cx-6,cy+18],[cx+24,cy-16]];
+      ctx.beginPath();ctx.moveTo(pts[0][0],pts[0][1]);
+      if(ee<.5){const k=ee/.5;ctx.lineTo(pts[0][0]+(pts[1][0]-pts[0][0])*k,pts[0][1]+(pts[1][1]-pts[0][1])*k)}
+      else{ctx.lineTo(pts[1][0],pts[1][1]);const k=(ee-.5)/.5;
+        ctx.lineTo(pts[1][0]+(pts[2][0]-pts[1][0])*k,pts[1][1]+(pts[2][1]-pts[1][1])*k)}
+      ctx.stroke();ctx.restore();
+
+      const pl=(t-DRAW-.45)%2.4;
+      if(pl>0&&pl<1.2){const z=pl/1.2;ctx.save();
+        ctx.strokeStyle='rgba(74,222,128,'+(.32*(1-z))+')';ctx.lineWidth=1;
+        shieldPath(1+z*.22);ctx.stroke();ctx.restore();}
+    }
+    raf=requestAnimationFrame(frame);
+  }
+  frame();
+
+  const gate=document.getElementById('gate'),site=document.getElementById('site'),flash=document.getElementById('flash');
+  let gone=false;
+  function go(){
+    if(gone)return;gone=true;
+    if(!reduce)flash.animate([{opacity:0},{opacity:.92,offset:.42},{opacity:0}],{duration:1000,easing:'cubic-bezier(.4,0,.2,1)'});
+    setTimeout(()=>{
+      gate.classList.add('out');site.classList.add('in');document.body.classList.remove('locked');
+      if(startConsole)startConsole();
+      setTimeout(()=>cancelAnimationFrame(raf),950);
+    },reduce?0:330);
+  }
+  document.getElementById('enterBtn').addEventListener('click',go);
+  addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&!gone){e.preventDefault();go()}});
+})();
+
+/* ── reveals + counters ─────────────────────────────── */
+const io=new IntersectionObserver(e=>e.forEach(x=>{if(x.isIntersecting){x.target.classList.add('in');io.unobserve(x.target)}}),{threshold:.1});
+document.querySelectorAll('.rv').forEach(el=>io.observe(el));
+const cio=new IntersectionObserver(es=>es.forEach(e=>{if(!e.isIntersecting)return;cio.unobserve(e.target);
+  const el=e.target,to=parseFloat(el.dataset.n),s=el.dataset.s||'',d=(el.dataset.n.split('.')[1]||'').length;
+  let st=null;const f=t=>{if(!st)st=t;const p=Math.min((t-st)/1050,1);
+    el.textContent=(to*(1-Math.pow(1-p,3))).toFixed(d)+s;if(p<1)requestAnimationFrame(f);else el.textContent=to.toFixed(d)+s};
+  requestAnimationFrame(f)}),{threshold:.5});
+document.querySelectorAll('.met .v').forEach(el=>cio.observe(el));
+
+/* ── ATT&CK grid fill ───────────────────────────────── */
+(function(){
+  const g=document.getElementById('grid');if(!g)return;
+  const COLS=window.innerWidth<700?10:14, ROWS=9, N=COLS*ROWS;
+  const cells=[];
+  for(let i=0;i<N;i++){const c=document.createElement('div');c.className='cell';g.appendChild(c);cells.push(c)}
+  const pattern=[];
+  for(let i=0;i<N;i++){const r=Math.random();
+    pattern.push(r>.86?'l4':r>.72?'l3':r>.55?'l2':r>.36?'l1':'')}
+  pattern[Math.floor(N*.31)]='bad'; pattern[Math.floor(N*.68)]='bad';
+  const go=new IntersectionObserver(es=>es.forEach(e=>{if(!e.isIntersecting)return;go.unobserve(e.target);
+    cells.forEach((c,i)=>setTimeout(()=>{if(pattern[i])c.classList.add(pattern[i])},i*11))}),{threshold:.25});
+  go.observe(g);
+})();
+
+/* ── hero console ───────────────────────────────────── */
+(function(){
+  const cb=document.getElementById('cb');
+  const S=[['attack types',1380],['risk assessment',1120],['vulnerabilities',1600],['anomalies',1980],['timeline',1240]];
+  const nap=ms=>new Promise(r=>setTimeout(r,ms));
+  const line=h=>{const d=document.createElement('div');d.className='ln';d.innerHTML=h;cb.appendChild(d);return d};
+  async function run(){
+    cb.innerHTML='';
+    line('<span class="g">$</span> aipcc generate <span class="w">edge-firewall-2026-07.csv</span>'); await nap(400);
+    line('<span class="g">✓</span> ingested — 195 chunks · row provenance recorded'); await nap(320);
+    line('<span class="g">✓</span> reserved report <span class="w">4a4b8db8</span> · status <span class="a">generating</span>'); await nap(290);
+    line('<span class="c">→</span> retrieving per section · 5 concurrent calls'); await nap(250);
+    const box=document.createElement('div');box.className='secs';cb.appendChild(box);
+    const rows=S.map(([nm],i)=>{const r=document.createElement('div');r.className='sec';r.style.animationDelay=(i*.05)+'s';
+      r.innerHTML='<span class="spin"></span><span class="nm">'+nm+'</span><span class="st" style="color:var(--mut)">analysing</span><span class="tm">0.0s</span>';
+      box.appendChild(r);return r});
+    const t0=performance.now();
+    const tk=setInterval(()=>rows.forEach(r=>{if(!r.dataset.done)r.querySelector('.tm').textContent=((performance.now()-t0)/1000).toFixed(1)+'s'}),90);
+    await Promise.all(S.map(async([nm,ms],i)=>{
+      await nap(ms); const r=rows[i];
+      if(i===2){r.querySelector('.st').textContent='retrying · repair prompt';r.querySelector('.st').style.color='var(--amber)';
+        r.querySelector('.spin').className='warn'; await nap(1200);}
+      r.dataset.done='1'; r.querySelector('.tm').textContent=((i===2?ms+1200:ms)/1000).toFixed(1)+'s';
+      r.querySelector('.spin')?.remove(); r.querySelector('.warn')?.remove();
+      r.insertAdjacentHTML('afterbegin','<span class="tick"></span>');
+      r.querySelector('.st').textContent='complete'; r.querySelector('.st').style.color='var(--green)';
+    }));
+    clearInterval(tk); await nap(320);
+    line('<span class="g">✓</span> validated against canonical schema · <span class="a">1 repair</span>'); await nap(290);
+    line('<span class="c">→</span> grounding check · 23 findings vs retrieved chunks'); await nap(400);
+    const f1=document.createElement('div');f1.className='find';
+    f1.innerHTML='<div class="ftop"><span class="tag hi">HIGH</span><span class="tag id">T1059</span><span class="ftitle">Command and Scripting Interpreter</span></div>'+
+      '<div class="cite">cites <b>chunk 10</b> · <b>chunk 11</b> · <b>chunk 85</b> — verified</div>'+
+      '<div class="raw">ROWS 52–56 · CHUNK 10\n2026-07-14T03:11:07Z  host=WKS-4471  user=rlee\n  powershell.exe -enc SQBFAFgAIAAoAE4AZQB3AC0A…</div>';
+    cb.appendChild(f1); await nap(720);
+    const f2=document.createElement('div');f2.className='find amb';
+    f2.innerHTML='<div class="ftop"><span class="tag am">UNGROUNDED</span><span class="tag am">T1888 · not in ATT&amp;CK</span><span class="ftitle">Flagged — not silently dropped</span></div>'+
+      '<div class="cite">cited no chunk it was shown · identifier absent from ATT&amp;CK Enterprise (823 techniques)</div>';
+    cb.appendChild(f2); await nap(640);
+    const sl=document.createElement('div');sl.className='sealed';
+    sl.innerHTML='<div class="h"><span>Source integrity</span><span class="sbadge">● SEALED</span></div>'+
+      '<div class="hash">7c52d00bc27c7547a7ddc30361d0ff40718409a1af803f7059dbb9e2b4594346</div>';
+    cb.appendChild(sl); await nap(560);
+    line('<span class="g">✓</span> stored · <span class="w">5/5 sections</span> · grounding <span class="g">100%</span> · hallucination <span class="g">0.0%</span>');
+    await nap(6600); run();
+  }
+  startConsole=run;
+})();
+</script>
+</body>
+</html>
