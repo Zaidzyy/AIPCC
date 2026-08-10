@@ -251,7 +251,7 @@ citations validated against what the model was actually shown, fabricated citati
 every finding's source log rows visible in the UI,
 **and an evaluation harness measuring hallucination and grounding rates against the real published
 MITRE ATT&CK and CWE catalogues and a hand-labelled golden log, with a deterministic replayed CI
-gate that needs no API key and an in-app Evaluation page.** 512 backend tests and 42 frontend
+gate that needs no API key and an in-app Evaluation page.** 521 backend tests and 42 frontend
 tests pass; `ruff check` and `npm run lint` are both clean with no warnings.
 
 Not yet written: the README and screenshots (Phase 7 part 2), held back until the project has been
@@ -1035,9 +1035,19 @@ not seen this file. The decisions:
   an old response against a new prompt would report the old model's quality as the new prompt's.
 - **A replayed call reports no tokens and no cost.** It spent nothing; reporting the recorded
   numbers would make a replayed run look like it cost money.
-- **Thresholds are configuration, and are not set to perfection.** A gate demanding 0% fails on its
-  first honest run and gets deleted. They sit where the recorded baseline sits, so a regression
-  trips them and normal variation does not.
+- **The committed fixture is deliberately the *weak* model, and the thresholds are calibrated to
+  it.** `llama3.1:8b` fabricated three ATT&CK technique names and cited five chunks it was never
+  given; every one is caught. A cassette of clean output would prove much less — a validator that
+  silently stopped working would look identical to a model that made no mistakes. The thresholds
+  are therefore regression bounds on a frozen recording, not the product's aspiration, and
+  `EVAL.md` prints the replayed and live numbers side by side so the two can never be confused.
+- **`EVAL_MIN_DETECTED_ISSUES` is what makes the rest mean anything.** On a frozen fixture a
+  validator that stopped catching would send the hallucination rate to *zero* and sail through
+  every upper bound — the regression would look like an improvement. So the gate also fails when
+  fewer than the fixture's four known identifier defects are found.
+- **Recording is serialised and paced; the application is not.** Five full-log prompts at once is
+  exactly what free provider tiers limit on, by input tokens per minute. Recording concurrently
+  returned `RESOURCE_EXHAUSTED` repeatedly and produced cassettes missing two or three sections.
 - **Refusing to answer is not a passing grade.** Every rate is `None` on a zero denominator, which
   would sail through every threshold, so the gate separately fails a run that emitted no
   identifiers or no findings at all.
@@ -1065,8 +1075,26 @@ retrieval is a fixed selection over a 35-row log, so a worse retriever would not
 numbers), generalisation beyond one synthetic CSV, and the behaviour of the current model in
 replay mode. All three are in `EVAL.md` under "What it does not prove".
 
-**Measured on a real live run** (`gemini-2.5-flash`, 2026-08-10): hallucination rate 0.0% (0/6
-identifiers), grounding rate 100% (23/23 findings), coverage recall 100% (9/9), distinct recall
-55.6%, precision 100%, section success 100%, retry rate 0%, 45,096 tokens, $0.078, 32.7 s.
+**Two measurements, both real** — `EVAL.md` carries the table:
+- *Live*, `gemini-2.5-flash`, 2026-08-10: hallucination 0.0% (0/6), grounding 100% (23/23),
+  coverage recall 100%, distinct recall 55.6%, precision 100%, 45,096 tokens, $0.078, 32.7 s.
+- *Replayed baseline*, `llama3.1:8b`: hallucination 75.0% (3/4), grounding 95.7% (22/23), five
+  fabricated citations, coverage recall 66.7%. This is the committed fixture, and it is the weak
+  model on purpose.
+
+**Bugs the harness found in the product, which is the point of having one:**
+- **`pandas.to_csv` uses `os.linesep`** — CRLF on Windows, LF on Linux — so chunk boundaries,
+  chunk ids, character offsets and row spans were all platform-dependent, quietly contradicting
+  Phase 10's determinism claim. Found by CI, where every recorded fixture missed. Fixed with an
+  explicit `lineterminator="
+"` and a regression test.
+- **A number in a text field sank a whole section.** The golden log's `user_id` is numeric, the
+  model returned `4471` rather than `"4471"`, and Pydantic rejected an int for a `str` field — for
+  every item, twice, retry included. `_blank_to_none` now coerces numeric scalars, dropping a
+  whole float's `.0` because "4471.0" is a different string from what the log contains.
+- **The model crammed several technique ids into one field** (`"T1059.001, T1543.003, T1071.001"`).
+  Valid ids, unusable output. The attack prompt now requires exactly one identifier.
+- **The recorder's own pacing collapsed on failure**, because `_last_call` was only stamped after a
+  successful call — so the first rate-limited call removed all spacing from the rest.
 
 **Update this section at the end of every phase.**

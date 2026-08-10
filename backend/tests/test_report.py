@@ -326,6 +326,31 @@ class TestSectionGeneration:
         assert outcome.items == []
         assert len(provider.prompts) == 1
 
+    @pytest.mark.parametrize(
+        "raw, expected",
+        [
+            (4471, "4471"),
+            (4471.0, "4471"),
+            (4471.5, "4471.5"),
+            ("4471", "4471"),
+            (True, "True"),
+            ("N/A", None),
+            ("", None),
+        ],
+    )
+    def test_a_number_in_a_text_field_is_coerced_not_rejected(self, raw, expected):
+        """A model writing `user_id: 4471` is right about the data.
+
+        Pydantic rejects an int for a `str` field, which failed validation for
+        every item and sank the whole anomalies section — twice, retry
+        included. Found by the evaluation harness on a live run against a log
+        whose user ids are numeric.
+
+        A whole float loses its `.0`: "4471.0" is a different string from what
+        the log contains and would break any grep against the source.
+        """
+        assert AnomalyItem(user_id=raw).user_id == expected
+
     def test_counted_coerces_to_int(self):
         assert AnomalyItem(counted="42").counted == 42
         assert AnomalyItem(counted="many").counted is None

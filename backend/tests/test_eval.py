@@ -346,6 +346,7 @@ class TestGate:
             "findings_grounded": 10,
             "grounding_rate": 1.0,
             "section_success_rate": 1.0,
+            "issues_by_kind": {"mitre_name_mismatch": 9},
         }
         base.update(metrics)
         return {"metrics": base}
@@ -355,7 +356,7 @@ class TestGate:
 
     def test_it_trips_on_hallucination(self):
         breaches = check_gate(
-            self._payload(hallucination_rate=0.5, invalid_identifiers=5)
+            self._payload(hallucination_rate=0.99, invalid_identifiers=10)
         )
         assert any("hallucination" in breach for breach in breaches)
 
@@ -383,10 +384,22 @@ class TestGate:
         assert len(breaches) == 2
         assert any("nothing was measured" in breach for breach in breaches)
 
+    def test_it_trips_when_the_validators_stop_catching(self):
+        """The regression a rate threshold cannot see.
+
+        On a frozen fixture, a validator that stopped detecting anything would
+        send the hallucination rate to *zero* and sail through every upper
+        bound. The committed cassette contains four known identifier defects,
+        so the gate also asserts a floor on how many are found.
+        """
+        breaches = check_gate(self._payload(issues_by_kind={}))
+        assert any("stopped catching" in breach for breach in breaches)
+
     def test_the_thresholds_come_from_config(self):
         """A quality bar is a project decision, not a constant in a function."""
         assert 0 <= settings.eval_max_hallucination_rate <= 1
         assert 0 <= settings.eval_min_grounding_rate <= 1
+        assert settings.eval_min_detected_issues >= 1
 
 
 # --- Replay ---------------------------------------------------------------
@@ -453,6 +466,29 @@ class TestRun:
         assert payload["catalogues"]["mitre_attack"]["version"]
         assert payload["metrics"]["findings_total"] > 0
         assert check_gate(payload) == [], "the committed baseline must pass its own gate"
+
+    def test_the_replayed_run_still_catches_the_fixtures_known_defects(self):
+        """The strongest statement this suite can make about the validators.
+
+        The committed cassette is a real recording from a small local model
+        that fabricated three ATT&CK technique names and cited chunks it was
+        never given. If this ever stops finding them, the harness has quietly
+        become decoration — which is the failure mode a rate threshold alone
+        cannot detect, because it would look like an improvement.
+        """
+        import asyncio
+
+        from app.eval.run import evaluate
+
+        payload = asyncio.run(evaluate(live=False, record=False))
+        kinds = payload["metrics"]["issues_by_kind"]
+
+        assert kinds.get("mitre_name_mismatch", 0) >= 3
+        assert payload["metrics"]["invalid_citations"] >= 1
+        details = " ".join(issue["detail"] for issue in payload["identifier_issues"])
+        # Named, so the assertion fails loudly if the catalogue is swapped for
+        # one that happens to agree with the model.
+        assert "Private Keys" in details
 
     def test_the_summary_says_which_mode_it_ran_in(self):
         """A replayed number describes the fixtures; a live one describes a

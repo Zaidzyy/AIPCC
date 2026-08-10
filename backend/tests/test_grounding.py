@@ -25,7 +25,7 @@ from app.schemas.report import (
     json_skeleton,
 )
 from app.services.grounding import SourceChunk, render_context, resolve
-from app.services.rag.chunk import chunk_logs, line_offsets
+from app.services.rag.chunk import chunk_logs, line_offsets, serialize
 from app.services.rag.vectorstore import chunk_key
 from app.services.report import SECTION_SPECS_BY_NAME, generate_section
 from app.services.report_storage import load_evidence, load_report_detail, store_report
@@ -148,6 +148,36 @@ class TestProvenance:
 
     def test_line_offsets_are_correct(self):
         assert line_offsets("a\nbb\nccc") == [0, 2, 5]
+
+    def test_serialisation_is_platform_independent(self):
+        """`to_csv` defaults to `os.linesep` — CRLF on Windows, LF on Linux.
+
+        Every downstream number moves with it: chunk boundaries, chunk ids,
+        character offsets and row spans. A citation recorded on a developer's
+        Windows machine would point at different rows inside the Linux
+        container, so Phase 10's "the same bytes produce the same chunk at the
+        same index" was false across platforms while looking true on each one.
+
+        Found by CI: the Phase 11 evaluation fixtures were recorded on Windows
+        and every single section missed on the Linux runner, because the
+        replay key is a hash of a prompt containing this text.
+        """
+        text = serialize(self._frame(rows=5), ".csv")
+        assert "\r" not in text
+        assert text.count("\n") == 6, "one header line plus five rows"
+
+    def test_chunking_is_identical_whatever_the_platform_would_do(self):
+        """The property the citation scheme actually depends on."""
+        frame = self._frame(rows=120)
+        first = chunk_logs({"document_id": "d"}, frame, ".csv")
+        # Same frame, serialised again — must produce byte-identical chunks
+        # with identical spans, or a re-ingest moves every existing citation.
+        second = chunk_logs({"document_id": "d"}, frame, ".csv")
+
+        assert [c["chunk"] for c in first] == [c["chunk"] for c in second]
+        assert [c["metadata"]["row_start"] for c in first] == [
+            c["metadata"]["row_start"] for c in second
+        ]
 
 
 # --- Citation validation --------------------------------------------------

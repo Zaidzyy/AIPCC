@@ -105,7 +105,7 @@ does the name match) is what the gate acts on.
 no vector store, no embedding model, no network and no API key**. It chunks the
 committed golden log with the same `chunk_logs` the real ingest uses, retrieves
 deterministically over those chunks, and replays provider responses recorded
-once from a real Gemini call.
+once from a real model.
 
 **Why not live.** A gate that makes LLM calls on every push needs a secret in
 CI, costs money per push, and is flaky by construction — the same prompt does
@@ -115,9 +115,11 @@ project has a quality gate in name only.
 
 ### What the replayed gate proves
 
-- The validators genuinely reject bad output — an invented technique id, a real
-  id under the wrong name, a malformed CVE, a non-existent CWE, a citation
-  pointing at a chunk that was never retrieved.
+- The validators genuinely reject bad output. Not hypothetically: the
+  committed cassette contains three fabricated ATT&CK technique names and five
+  citations to chunks the model was never given, and
+  `TestRun::test_the_replayed_run_still_catches_the_fixtures_known_defects`
+  fails if any of them stops being found.
 - The parser, repair retry, citation resolver, golden matcher and metric
   arithmetic behave as claimed, and a change to any of them moves the numbers.
 - The thresholds trip. `tests/test_eval.py::TestGate` fires each one.
@@ -140,21 +142,54 @@ project has a quality gate in name only.
 
 ---
 
+## Two measurements, and they say different things
+
+| | Replayed (CI) | Live (`--live`) |
+|---|---|---|
+| Recorded from | `ollama:llama3.1:8b` | whatever `LLM_PROVIDER` selects |
+| Hallucination rate | **75.0%** (3/4 identifiers) | **0.0%** (0/6) on `gemini-2.5-flash` |
+| Grounding rate | 95.7% (22/23) | 100% (23/23) |
+| Fabricated citations | 5 (17.9%) | 0 |
+| Recall (coverage / distinct) | 66.7% / 55.6% | 100% / 55.6% |
+| Precision | 100% | 100% |
+| Section success | 100% | 100% |
+| Cost | — (local) | $0.078, 45,096 tokens, 32.7 s |
+
+*Live figures measured 2026-08-10 against `gemini-2.5-flash`.*
+
+**The committed fixture is deliberately the weak model.** `llama3.1:8b`
+fabricated three ATT&CK technique names — `T1145` as "Authenticode Code
+Signing" (it is *Private Keys*), `T1210` as "Exploit User Privilege" (it is
+*Exploitation of Remote Services*), `T1021.001` as "Remote Services" (it is
+*Remote Desktop Protocol*) — and cited five chunks it was never given. Every
+one is caught. A cassette of clean output would make the gate prove much less:
+a validator that silently stopped working would look identical to a model that
+made no mistakes.
+
 ## Thresholds
 
 In `app/core/config.py`, because a quality bar is a project decision that
 changes as the system improves, and one buried in code is one nobody raises:
 
 ```
-EVAL_MAX_HALLUCINATION_RATE=0.10
-EVAL_MIN_GROUNDING_RATE=0.80
+EVAL_MAX_HALLUCINATION_RATE=0.80
+EVAL_MIN_GROUNDING_RATE=0.90
 EVAL_MIN_SECTION_SUCCESS_RATE=0.80
+EVAL_MIN_DETECTED_ISSUES=4
 ```
 
-They are deliberately not set to perfection. A gate that demands 0% on its
-first honest run fails immediately and gets deleted; these sit where the
-recorded baseline sits, so a **regression** trips them and normal variation
-does not. Raise them as the numbers improve.
+**These are regression thresholds calibrated to the committed fixture, not the
+product's aspiration.** The gate replays a frozen recording, so its numbers are
+constants until the *harness* changes — which is exactly what a gate on a
+fixture can detect. Holding a 75%-hallucination fixture to a 10% bar would
+leave CI permanently red and prove nothing. Against the default provider the
+live number is 0%.
+
+`EVAL_MIN_DETECTED_ISSUES` is the one that makes the rest mean anything. On a
+frozen fixture, a validator that stopped catching things would send the
+hallucination rate to **zero** and sail through every upper bound — the
+regression would look like an improvement. So the gate also fails when fewer
+than the known four identifier defects are found.
 
 ---
 
@@ -164,10 +199,17 @@ Needed whenever a prompt changes — which the harness will tell you, because
 replay will miss:
 
 ```bash
-# with a real key in .env
+# against the configured provider — a key for a hosted one, or a local Ollama
 python -m app.eval.run --live --record
 git add app/eval/fixtures/golden_run.json app/eval/results/latest.json
 ```
+
+Recording is **serialised and paced** (`--record-interval`, default 20 s) while
+the application itself stays concurrent. Five full-log prompts at once is
+precisely what free provider tiers rate-limit on, by input tokens per minute;
+recording that way returned `RESOURCE_EXHAUSTED` and produced cassettes missing
+two or three sections. A recorder that cannot record on the tier most people
+have is not much of a recorder.
 
 Review the diff. A fixture is a record of what a model actually said, and it
 should change only when you intended a prompt change.

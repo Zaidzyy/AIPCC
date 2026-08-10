@@ -26,7 +26,30 @@ from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 
 def _blank_to_none(value: object) -> object:
-    """LLMs emit "", "null", "N/A" and "unknown" where they mean null."""
+    """Normalise what a model actually emits for a text field.
+
+    Two coercions, both of which cost a whole section before they were added:
+
+    1. LLMs write "", "null", "N/A" and "unknown" where they mean null.
+    2. LLMs write **numbers** for text fields that hold numeric-looking values.
+       `user_id` in a log is `4471`, and a model returning `4471` rather than
+       `"4471"` is right about the data and merely typed differently — but
+       Pydantic rejects an int for a `str` field, which failed validation for
+       every item and sank the whole anomalies section twice, retry included.
+       Found by the evaluation harness on a live run, which is what it is for.
+
+    A float that is a whole number is rendered without its `.0`, because
+    `"4471.0"` as a user id is a different string from what the log contains
+    and would break any lookup or grep against the source.
+    """
+    if isinstance(value, bool):
+        # Before the numeric branch: `bool` is a subclass of `int`, and "True"
+        # is the right rendering of a boolean, not "1".
+        return str(value)
+    if isinstance(value, int):
+        return str(value)
+    if isinstance(value, float):
+        return str(int(value)) if value.is_integer() else str(value)
     if isinstance(value, str):
         stripped = value.strip()
         if stripped == "" or stripped.lower() in {"null", "none", "n/a", "na", "unknown"}:

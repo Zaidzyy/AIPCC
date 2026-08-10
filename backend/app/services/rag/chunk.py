@@ -36,8 +36,24 @@ TABULAR_EXTENSIONS = {".csv", ".json"}
 
 
 def serialize(loaded_file: pd.DataFrame | str, extension: str) -> str:
+    """Render a loaded file as the text that gets split.
+
+    **`lineterminator="\\n"` is not cosmetic.** `to_csv` defaults to
+    `os.linesep`, so the same DataFrame serialises with CRLF on Windows and LF
+    on Linux — and every downstream number moves with it: chunk boundaries,
+    chunk ids, character offsets and row spans. A citation recorded on a
+    developer's Windows machine would point at different rows inside the Linux
+    container, and Phase 10's "the same bytes produce the same chunk at the
+    same index" would be false across platforms while looking true on each one.
+
+    Found by CI: the evaluation fixtures were recorded on Windows and every
+    single one missed on the Linux runner, because the prompt hash is taken
+    over text that included the line endings.
+    """
     if extension in TABULAR_EXTENSIONS and isinstance(loaded_file, pd.DataFrame):
-        return loaded_file.to_csv(index=False)
+        return loaded_file.to_csv(index=False, lineterminator="\n")
+    # Text and log files are read with Python's universal newlines, which has
+    # already normalised CRLF to LF by the time they reach here.
     return loaded_file
 
 

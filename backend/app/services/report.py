@@ -84,6 +84,17 @@ SECTION_SPECS: list[SectionSpec] = [
         guidance=(
             "- Give the 3 main detected attacks.\n"
             "- Do not invent attacks that did not happen.\n"
+            # Added after the evaluation harness caught it on a live run: the
+            # model crammed "T1059.001, T1543.003, T1071.001" into the id field
+            # for a single finding. Valid ids, unusable output — nothing
+            # downstream can look up a comma-separated string.
+            "- attack_mitre_technique_id must be exactly one identifier, such as "
+            "T1110 or T1059.001. If several techniques apply, report them as "
+            "separate attacks or choose the most specific one. Never put a list "
+            "or a comma-separated string in that field.\n"
+            "- attack_mitre_technique_name must be the official ATT&CK name for "
+            "that exact id, and nothing else. If you are not certain of the "
+            "name, set both fields to null rather than guessing.\n"
             "- For each attack also give its risk assessment, as flat fields on the "
             "same object (risk_name, risk_description, risk_level, impact, "
             "likelihood, mitigation). Do not nest them under another key.\n"

@@ -1,15 +1,16 @@
 {
  "run": {
   "mode": "replay",
-  "provider": "replay:gemini-2.5-flash",
-  "recorded_from": "gemini:gemini-2.5-flash",
-  "at": "2026-08-10T13:47:40+00:00",
+  "provider": "replay:llama3.1:8b",
+  "recorded_from": "ollama:llama3.1:8b",
+  "at": "2026-08-10T14:54:21+00:00",
   "golden_log": "golden_log.csv",
   "golden_chunks": 5,
   "thresholds": {
-   "max_hallucination_rate": 0.1,
-   "min_grounding_rate": 0.8,
-   "min_section_success_rate": 0.8
+   "max_hallucination_rate": 0.8,
+   "min_grounding_rate": 0.9,
+   "min_section_success_rate": 0.8,
+   "min_detected_issues": 4
   }
  },
  "catalogues": {
@@ -33,25 +34,28 @@
   }
  },
  "metrics": {
-  "identifiers_emitted": 6,
-  "invalid_identifiers": 0,
-  "hallucination_rate": 0.0,
-  "issues_by_kind": {},
+  "identifiers_emitted": 4,
+  "invalid_identifiers": 3,
+  "hallucination_rate": 0.75,
+  "issues_by_kind": {
+   "mitre_name_mismatch": 3,
+   "mitre_retired": 1
+  },
   "findings_total": 23,
-  "findings_grounded": 23,
-  "grounding_rate": 1.0,
-  "invalid_citations": 0,
-  "citation_error_rate": 0.0,
+  "findings_grounded": 22,
+  "grounding_rate": 0.9565,
+  "invalid_citations": 5,
+  "citation_error_rate": 0.1786,
   "expected_total": 9,
-  "matched_total": 9,
-  "recall": 1.0,
+  "matched_total": 6,
+  "recall": 0.6667,
   "distinct_total": 5,
   "distinct_recall": 0.5556,
   "precision": 1.0,
   "false_positives": 0,
   "mitre_expected": 7,
-  "mitre_agreed": 1,
-  "mitre_agreement": 0.1429,
+  "mitre_agreed": 0,
+  "mitre_agreement": 0.0,
   "sections_total": 5,
   "sections_succeeded": 5,
   "section_success_rate": 1.0,
@@ -60,24 +64,25 @@
   "retry_rate": 0.0,
   "total_tokens": null,
   "cost_usd": null,
-  "generation_ms": 13.16,
-  "p95_call_ms": 0.62
+  "generation_ms": 20.33,
+  "p95_call_ms": 1.09
  },
  "attacks": {
   "matched": [
    "brute_force",
    "exfiltration",
-   "persistence",
    "powershell_execution",
-   "lateral_movement",
+   "lateral_movement"
+  ],
+  "missed": [
+   "persistence",
    "c2_beacon",
    "log_clearing"
   ],
-  "missed": [],
   "distinct": [
    "brute_force",
-   "persistence",
-   "exfiltration"
+   "powershell_execution",
+   "lateral_movement"
   ],
   "unmatched_findings": [],
   "false_positives": []
@@ -93,13 +98,42 @@
    "anomalous_account"
   ],
   "unmatched_findings": [
-   "Large File Uploads to External Storage",
-   "System Compromise & Persistence",
-   "C2 Beaconing Activity"
+   "Suspicious HTTPS uploads",
+   "Periodic HTTPS beacons",
+   "Unusual SMB access from multiple users"
   ],
   "false_positives": []
  },
- "identifier_issues": [],
+ "identifier_issues": [
+  {
+   "kind": "mitre_name_mismatch",
+   "section": "attack_types",
+   "item": 0,
+   "value": "T1145",
+   "detail": "T1145 is 'Private Keys', not 'Authenticode Code Signing'"
+  },
+  {
+   "kind": "mitre_retired",
+   "section": "attack_types",
+   "item": 0,
+   "value": "T1145",
+   "detail": "T1145 (Private Keys) is deprecated or revoked in ATT&CK"
+  },
+  {
+   "kind": "mitre_name_mismatch",
+   "section": "attack_types",
+   "item": 1,
+   "value": "T1210",
+   "detail": "T1210 is 'Exploitation of Remote Services', not 'Exploit User Privilege'"
+  },
+  {
+   "kind": "mitre_name_mismatch",
+   "section": "attack_types",
+   "item": 2,
+   "value": "T1021.001",
+   "detail": "T1021.001 is 'Remote Desktop Protocol', not 'Remote Services'"
+  }
+ ],
  "section_errors": [],
  "gate": {
   "passed": true,

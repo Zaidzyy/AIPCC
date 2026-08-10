@@ -25,8 +25,10 @@ prompt would report the old model's quality as if it were the new prompt's.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -57,17 +59,40 @@ class Interaction:
 
 
 class RecordingProvider(LLMProvider):
-    """Wraps a real provider and writes down everything it returns."""
+    """Wraps a real provider and writes down everything it returns.
 
-    def __init__(self, inner: LLMProvider):
+    **Recording is serialised and paced, and the application is not.** The five
+    sections deliberately fan out concurrently — that is the whole point of
+    Phase 1 and what Phase 9's trace proves — but firing five full log prompts
+    at once is exactly what free provider tiers rate-limit on, by input tokens
+    per minute. Recording that way failed repeatedly with `RESOURCE_EXHAUSTED`
+    and produced cassettes missing two or three sections.
+
+    A recorder that cannot record on the tier most people have is not much of a
+    recorder, so this one takes a lock and waits between calls. It costs a
+    minute on a command that is run rarely and by hand, and it changes nothing
+    about how the application itself calls the provider.
+    """
+
+    def __init__(self, inner: LLMProvider, min_interval_seconds: float = 20.0):
         self._inner = inner
         self.name = inner.name
         self.model = inner.model
         self.interactions: list[Interaction] = []
         self._seen: dict[str, int] = {}
+        self._min_interval = min_interval_seconds
+        self._lock = asyncio.Lock()
+        self._last_call: float | None = None
 
     async def _invoke(self, prompt: str) -> tuple[str, Usage]:
-        result = await self._inner.generate(prompt)
+        async with self._lock:
+            if self._last_call is not None:
+                wait = self._min_interval - (time.monotonic() - self._last_call)
+                if wait > 0:
+                    await asyncio.sleep(wait)
+            result = await self._inner.generate(prompt)
+            self._last_call = time.monotonic()
+
         key = prompt_key(prompt)
         self._seen[key] = self._seen.get(key, 0) + 1
         self.interactions.append(

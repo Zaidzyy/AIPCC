@@ -36,18 +36,20 @@ RESULTS_DIR = Path(__file__).parent / "results"
 LATEST = RESULTS_DIR / "latest.json"
 
 
-def _provider(live: bool, record: bool) -> tuple[LLMProvider, RecordingProvider | None]:
+def _provider(
+    live: bool, record: bool, interval: float
+) -> tuple[LLMProvider, RecordingProvider | None]:
     if not live:
         return ReplayProvider(), None
     real = get_llm_provider()
     if record:
-        recorder = RecordingProvider(real)
+        recorder = RecordingProvider(real, min_interval_seconds=interval)
         return recorder, recorder
     return real, None
 
 
-async def evaluate(*, live: bool, record: bool) -> dict:
-    provider, recorder = _provider(live, record)
+async def evaluate(*, live: bool, record: bool, interval: float = 20.0) -> dict:
+    provider, recorder = _provider(live, record, interval)
 
     result = await generate_report(
         harness.GOLDEN_DOCUMENT_ID,
@@ -83,6 +85,7 @@ async def evaluate(*, live: bool, record: bool) -> dict:
                 "max_hallucination_rate": settings.eval_max_hallucination_rate,
                 "min_grounding_rate": settings.eval_min_grounding_rate,
                 "min_section_success_rate": settings.eval_min_section_success_rate,
+                "min_detected_issues": settings.eval_min_detected_issues,
             },
         },
         # Emitted with every run so numbers can never be read without the
@@ -133,6 +136,14 @@ def check_gate(payload: dict) -> list[str]:
         breaches.append(
             f"section success rate {sections:.1%} is below "
             f"{settings.eval_min_section_success_rate:.1%}"
+        )
+
+    detected = sum(m.get("issues_by_kind", {}).values())
+    if detected < settings.eval_min_detected_issues:
+        breaches.append(
+            f"the validators detected {detected} identifier issues, below the "
+            f"{settings.eval_min_detected_issues} the committed fixture is known to "
+            "contain — a validator has stopped catching something"
         )
 
     # A run that emitted no identifiers at all scores a `None` hallucination
@@ -247,13 +258,25 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--record", action="store_true", help="save responses as fixtures")
     parser.add_argument("--gate", action="store_true", help="exit non-zero on a threshold breach")
     parser.add_argument("--json", action="store_true", help="print JSON only")
+    parser.add_argument(
+        "--record-interval",
+        type=float,
+        default=20.0,
+        help=(
+            "seconds between recorded calls. Free provider tiers limit input "
+            "tokens per minute, and five full-log prompts at once trips them; "
+            "raise this if recording returns RESOURCE_EXHAUSTED."
+        ),
+    )
     parser.add_argument("--out", type=Path, default=LATEST)
     args = parser.parse_args(argv)
 
     if args.record and not args.live:
         parser.error("--record requires --live: there is nothing to record from a replay")
 
-    payload = asyncio.run(evaluate(live=args.live, record=args.record))
+    payload = asyncio.run(
+        evaluate(live=args.live, record=args.record, interval=args.record_interval)
+    )
     breaches = check_gate(payload)
     payload["gate"] = {"passed": not breaches, "breaches": breaches}
 
