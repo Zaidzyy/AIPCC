@@ -26,19 +26,6 @@ PDF/DOCX export, revocable share links, an append-only audit log, per-call token
 and cost accounting, and n8n workflows for scheduling and third-party
 enrichment.
 
-**Rebuilt from a university group prototype.** The original
-([`ahmed2bassam/AIPCC`](https://github.com/ahmed2bassam/AIPCC), 7 contributors,
-dormant since March 2026) proved that RAG-over-logs plus a structured report was
-a real idea. It was also structurally broken: it dropped and recreated its
-database on every boot, hardcoded `current_user`, stored plaintext passwords,
-stacked every page in `App.jsx` with no router, and its report-writing prompt and
-its storage layer disagreed about field names so rows saved mostly null. **This
-repo is a ground-up reimplementation.** The RAG pipeline and the five section
-prompts were ported; everything else was rewritten. The specific defects and
-what happened to each are in [`PORTING.md`](PORTING.md), and the six that must
-never come back are enforced by tests, not by convention —
-`tests/test_foundation.py::TestHardRules`.
-
 ---
 
 ## Headline numbers
@@ -164,66 +151,55 @@ dashboard are the ownership scoping working.
 </details>
 
 ---
+## n8n automation
 
-## Architecture
+Three workflows, all executed inside n8n against a running backend with a real
+service key and live Groq / AbuseIPDB / VirusTotal credentials — the screenshots
+below are those runs, not dry ones. Import instructions and the full contract for
+every endpoint they call are in [`n8n/IMPORT.md`](n8n/IMPORT.md).
 
-```mermaid
-flowchart TD
-    UP(["Security log<br/>csv · json · txt · log"])
+![The AI Security Report Orchestrator in n8n, every node green, execution succeeded in 2.082s](docs/images/n8n-orchestrator-execution.png)
+*The **AI Security Report Orchestrator** (16 nodes) completing end to end in 2.082 s: webhook → fetch logs → Groq agent → risk scoring → IOC classification → AbuseIPDB reputation → threat-intel merge → DOCX → store. Every node green, not a dry run.*
 
-    subgraph ing ["Ingest — the only moment provenance exists"]
-        CH["chunk_logs<br/>deterministic split<br/>stable (document_id, chunk_id)"]
-        PR["row + line provenance<br/>exact or absent, never approximate"]
-        EM["MiniLM embeddings"]
-        CH --> PR --> EM
-    end
+![The store node's input JSON and the stored report returned by the backend](docs/images/n8n-orchestrator-store-node.png)
+*The store node, input on the left and the backend's response on the right. This is the seam where n8n stops being authoritative: `/store_generated_report` re-validates the sections against the same Pydantic schema the in-app generator uses before anything is written. The exported workflow originally sent `report_json`, `user_id` and `generated_filename`, none of which exist on that endpoint — `user_id` is gone and is not coming back, because a body field naming the owner would be a hard-rule violation wearing a disguise.*
 
-    VS[("Chroma<br/>chunk id = primary key<br/>re-ingest is an upsert")]
+![The FIM & Audit Engine sweeping 47 reports through hash, compare and SEALED](docs/images/n8n-fim-execution.png)
+*The **FIM & Audit Engine** (14 nodes) sweeping **47 reports**: fetch → skip unsealed → download by id → SHA-256 → compare against the hash sealed at generation time → SEALED, or VirusTotal lookup → TAMPERED plus a security alert. A report with a null `file_hash` is filtered out rather than failed — comparing against a null hash would mark every unsealable report TAMPERED, which is a false accusation, not a finding.*
 
-    subgraph gen ["Generation — five sections, concurrently"]
-        RET["retrieve per section"]
-        S1["attack types"]
-        S2["risk assessment"]
-        S3["vulnerabilities"]
-        S4["anomalies"]
-        S5["timeline"]
-        RET --> S1 & S2 & S3 & S4 & S5
-    end
+![A generated DOCX open in Word, with a letterhead logo and a MITRE technique table](docs/images/generated-docx-report.png)
+*The **Simple Report Generator** (3 nodes) output: a real .docx produced by the workflow and opened in Word, with an embedded letterhead image and the MITRE mapping as a table. Self-contained — it calls no backend endpoint, and is kept as a reference implementation now that export lives in the backend.*
 
-    VAL{"Validate against the<br/>canonical Pydantic schema"}
-    RETRY["repair prompt<br/>one retry, then a typed SectionError"]
-    GRD["Grounding<br/>citations checked against<br/>what the section was shown"]
-    DB[("PostgreSQL<br/>18 tables · Alembic")]
+![Security alerts raised by the FIM engine, both critical, each linked to the report it concerns](docs/images/security-alerts.jpg)
+*The alerts those workflows raise, in the app. Both are file-integrity mismatches attributed to **the owner of the report they concern**, not to the service account that posted them — so they reach the analyst rather than a machine's inbox. Severity is normalised on the way in and never rejected: losing an alert because its severity was spelled oddly is worse than filing it one notch off.*
 
-    UP --> CH
-    EM --> VS
-    VS --> RET
-    S1 & S2 & S3 & S4 & S5 --> VAL
-    VAL -- rejected --> RETRY --> VAL
-    VAL -- accepted --> GRD --> DB
+<details>
+<summary>What the exported FIM graph got wrong, and path safety</summary>
 
-    SSE["SSE progress<br/>started · retrying · completed · failed"]
-    gen -.-> SSE
-    UI["React SPA<br/>report · ATT&amp;CK matrix · attack graph"]
-    N8N["n8n — scheduling + enrichment<br/>Groq · AbuseIPDB · VirusTotal · FIM"]
-    EV["Eval harness<br/>hallucination · grounding · recall<br/>vendored ATT&amp;CK + CWE"]
+The graph as exported could not have worked even with auth attached. It read
+`$json.report[0].document_name` against an API that returns a **flat** report
+object, so every downstream expression referenced a shape the API never had. It
+had two nodes fetching the same file and merged one of them with a hash of the
+other. And it ran **every minute** — re-hashing every document in the system
+sixty times an hour is not monitoring, it is a load test. It now downloads once,
+by id, and runs every 15 minutes.
 
-    DB --> UI
-    SSE --> UI
-    N8N -->|"POST /store_generated_report<br/>re-validated on arrival"| VAL
-    DB --> N8N
-    GRD --> EV
-```
+**A caller-supplied file name is a database key, never a path.**
+`GET /uploads/{document_name}` resolves the name against the `documents` table
+and serves *that row's* stored path; `settings.upload_dir / name` would happily
+open `../../.env`. The stored path is then still checked to resolve inside the
+upload directory, because a row written by older code is untrusted input too.
 
-The non-obvious part is the arrow from **n8n back into Validate**. The n8n
-Orchestrator duplicates the Python generator, and they are not peers: **the
-Python generator is authoritative.** It owns the canonical schema, the repair
-retry and the section-error contract. n8n is a *client* of that schema — it
-produces sections and hands them to `/store_generated_report`, which validates
-them exactly as the in-app path does before anything reaches a table. n8n owns
-scheduling and third-party enrichment: questions about *when* and *from where*,
-never about *what is true*. A workflow can be edited by anyone with n8n access;
-the invariants cannot be edited from there at all.
+Both download routes return **410**, not 404, when the record exists and the
+bytes are gone. Those are different problems and the FIM engine handles them
+differently.
+
+A committed test fails the build if any workflow JSON carries an embedded
+credential — `tests/test_foundation.py::TestNoEmbeddedCredentials`, including a
+test that the detector itself still fires and one that ordinary n8n expressions
+and URLs are not flagged.
+
+</details>
 
 ---
 
@@ -773,55 +749,66 @@ name. Nothing failed, which is exactly why it now has a test.
 
 ---
 
-## n8n automation
+## Architecture
 
-Three workflows, all executed inside n8n against a running backend with a real
-service key and live Groq / AbuseIPDB / VirusTotal credentials — the screenshots
-below are those runs, not dry ones. Import instructions and the full contract for
-every endpoint they call are in [`n8n/IMPORT.md`](n8n/IMPORT.md).
+```mermaid
+flowchart TD
+    UP(["Security log<br/>csv · json · txt · log"])
 
-![The AI Security Report Orchestrator in n8n, every node green, execution succeeded in 2.082s](docs/images/n8n-orchestrator-execution.png)
-*The **AI Security Report Orchestrator** (16 nodes) completing end to end in 2.082 s: webhook → fetch logs → Groq agent → risk scoring → IOC classification → AbuseIPDB reputation → threat-intel merge → DOCX → store. Every node green, not a dry run.*
+    subgraph ing ["Ingest — the only moment provenance exists"]
+        CH["chunk_logs<br/>deterministic split<br/>stable (document_id, chunk_id)"]
+        PR["row + line provenance<br/>exact or absent, never approximate"]
+        EM["MiniLM embeddings"]
+        CH --> PR --> EM
+    end
 
-![The store node's input JSON and the stored report returned by the backend](docs/images/n8n-orchestrator-store-node.png)
-*The store node, input on the left and the backend's response on the right. This is the seam where n8n stops being authoritative: `/store_generated_report` re-validates the sections against the same Pydantic schema the in-app generator uses before anything is written. The exported workflow originally sent `report_json`, `user_id` and `generated_filename`, none of which exist on that endpoint — `user_id` is gone and is not coming back, because a body field naming the owner would be a hard-rule violation wearing a disguise.*
+    VS[("Chroma<br/>chunk id = primary key<br/>re-ingest is an upsert")]
 
-![The FIM & Audit Engine sweeping 47 reports through hash, compare and SEALED](docs/images/n8n-fim-execution.png)
-*The **FIM & Audit Engine** (14 nodes) sweeping **47 reports**: fetch → skip unsealed → download by id → SHA-256 → compare against the hash sealed at generation time → SEALED, or VirusTotal lookup → TAMPERED plus a security alert. A report with a null `file_hash` is filtered out rather than failed — comparing against a null hash would mark every unsealable report TAMPERED, which is a false accusation, not a finding.*
+    subgraph gen ["Generation — five sections, concurrently"]
+        RET["retrieve per section"]
+        S1["attack types"]
+        S2["risk assessment"]
+        S3["vulnerabilities"]
+        S4["anomalies"]
+        S5["timeline"]
+        RET --> S1 & S2 & S3 & S4 & S5
+    end
 
-![A generated DOCX open in Word, with a letterhead logo and a MITRE technique table](docs/images/generated-docx-report.png)
-*The **Simple Report Generator** (3 nodes) output: a real .docx produced by the workflow and opened in Word, with an embedded letterhead image and the MITRE mapping as a table. Self-contained — it calls no backend endpoint, and is kept as a reference implementation now that export lives in the backend.*
+    VAL{"Validate against the<br/>canonical Pydantic schema"}
+    RETRY["repair prompt<br/>one retry, then a typed SectionError"]
+    GRD["Grounding<br/>citations checked against<br/>what the section was shown"]
+    DB[("PostgreSQL<br/>18 tables · Alembic")]
 
-![Security alerts raised by the FIM engine, both critical, each linked to the report it concerns](docs/images/security-alerts.jpg)
-*The alerts those workflows raise, in the app. Both are file-integrity mismatches attributed to **the owner of the report they concern**, not to the service account that posted them — so they reach the analyst rather than a machine's inbox. Severity is normalised on the way in and never rejected: losing an alert because its severity was spelled oddly is worse than filing it one notch off.*
+    UP --> CH
+    EM --> VS
+    VS --> RET
+    S1 & S2 & S3 & S4 & S5 --> VAL
+    VAL -- rejected --> RETRY --> VAL
+    VAL -- accepted --> GRD --> DB
 
-<details>
-<summary>What the exported FIM graph got wrong, and path safety</summary>
+    SSE["SSE progress<br/>started · retrying · completed · failed"]
+    gen -.-> SSE
+    UI["React SPA<br/>report · ATT&amp;CK matrix · attack graph"]
+    N8N["n8n — scheduling + enrichment<br/>Groq · AbuseIPDB · VirusTotal · FIM"]
+    EV["Eval harness<br/>hallucination · grounding · recall<br/>vendored ATT&amp;CK + CWE"]
 
-The graph as exported could not have worked even with auth attached. It read
-`$json.report[0].document_name` against an API that returns a **flat** report
-object, so every downstream expression referenced a shape the API never had. It
-had two nodes fetching the same file and merged one of them with a hash of the
-other. And it ran **every minute** — re-hashing every document in the system
-sixty times an hour is not monitoring, it is a load test. It now downloads once,
-by id, and runs every 15 minutes.
+    DB --> UI
+    SSE --> UI
+    N8N -->|"POST /store_generated_report<br/>re-validated on arrival"| VAL
+    DB --> N8N
+    GRD --> EV
+```
 
-**A caller-supplied file name is a database key, never a path.**
-`GET /uploads/{document_name}` resolves the name against the `documents` table
-and serves *that row's* stored path; `settings.upload_dir / name` would happily
-open `../../.env`. The stored path is then still checked to resolve inside the
-upload directory, because a row written by older code is untrusted input too.
+The non-obvious part is the arrow from **n8n back into Validate**. The n8n
+Orchestrator duplicates the Python generator, and they are not peers: **the
+Python generator is authoritative.** It owns the canonical schema, the repair
+retry and the section-error contract. n8n is a *client* of that schema — it
+produces sections and hands them to `/store_generated_report`, which validates
+them exactly as the in-app path does before anything reaches a table. n8n owns
+scheduling and third-party enrichment: questions about *when* and *from where*,
+never about *what is true*. A workflow can be edited by anyone with n8n access;
+the invariants cannot be edited from there at all.
 
-Both download routes return **410**, not 404, when the record exists and the
-bytes are gone. Those are different problems and the FIM engine handles them
-differently.
-
-A committed test fails the build if any workflow JSON carries an embedded
-credential — `tests/test_foundation.py::TestNoEmbeddedCredentials`, including a
-test that the detector itself still fires and one that ordinary n8n expressions
-and URLs are not flagged.
-
-</details>
 
 ---
 
