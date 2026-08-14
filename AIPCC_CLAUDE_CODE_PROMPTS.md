@@ -17,7 +17,7 @@ This is AIPCC, an AI-powered cybersecurity report generator: FastAPI + SQLAlchem
 Chroma (HuggingFace MiniLM embeddings) + an LLM + React (Vite), with n8n workflows for automation.
 It's a PORTFOLIO project — prioritize clean architecture, reproducibility, and tests over feature sprawl.
 
-This repo is a ground-up rebuild of an incomplete university group prototype. PORTING.md says exactly
+This repo is a ground-up rebuild of an incomplete internship prototype. PORTING.md says exactly
 what to carry over and what to rewrite.
 
 Ground rules:

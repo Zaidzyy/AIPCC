@@ -13,9 +13,10 @@ assessment, vulnerabilities (CVE/CWE), anomalies, and an event timeline. Also pr
 "talk to your data" chat over ingested documents, a threat-intel enrichment path, and file-integrity
 monitoring.
 
-**This repo is a ground-up rebuild.** A working prototype exists (university group project, 7
-contributors) which proved the RAG + report concept but was incomplete and structurally broken.
-Its RAG/report logic is being ported; nothing else is. See `PORTING.md`.
+**This repo is a ground-up rebuild.** A working prototype exists (built by an intern team during a
+cybersecurity and AI automation internship at ADNOC, 7 contributors) which proved the RAG + report
+concept but was incomplete and structurally broken. Its RAG/report logic is being ported; nothing
+else is. See `PORTING.md`.
 
 **Purpose: portfolio.** Optimize for clean architecture, reproducibility (one-command run), and
 tests — over feature count. A reviewer should be able to clone, run `docker compose up`, log in with
@@ -1420,8 +1421,8 @@ HIGH · 1 observation`, its two edges, and its two findings labelled `mention` a
 
 ### Decisions taken in Phase 15 — the README
 
-- **The rebuild framing is the opening, not a footnote.** "Rebuilt from a university group
-  prototype" with the link, the specific defects named, and the note that the six worst are
+- **The rebuild framing is the opening, not a footnote.** "Rebuilt from an internship prototype"
+  with the specific defects named, and the note that the six worst are
   enforced by tests. A README that hides its origin invites the reader to discover it; one that
   states it up front is the stronger claim, and it is the one PORTING.md asked for.
 - **Live figures lead; the CI cassette is quarantined behind a purpose column.** A skimmer must

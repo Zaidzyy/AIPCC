@@ -25,6 +25,18 @@ attack graph built from stored rows, PDF/DOCX export, revocable share links, an
 append-only audit log, cost accounting, and n8n workflows for scheduling and
 enrichment.
 
+**Rebuilt from an internship prototype.** An earlier version, built by an intern
+team during a cybersecurity and AI automation internship at ADNOC, proved that
+RAG-over-logs plus a structured report was a real idea. It was also structurally
+broken: it dropped and recreated its database on every boot, hardcoded
+`current_user`, stored plaintext passwords, stacked every page in `App.jsx` with
+no router, and its report-writing prompt and its storage layer disagreed about
+field names, so rows saved mostly null. **This repo is a ground-up
+reimplementation.** The RAG pipeline and the five section prompts were ported;
+everything else was rewritten. What happened to each defect is recorded in
+[`PORTING.md`](PORTING.md), and the six that must never come back are enforced
+by tests rather than convention — `tests/test_foundation.py::TestHardRules`.
+
 ---
 
 ## Headline numbers

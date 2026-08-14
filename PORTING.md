@@ -1,8 +1,8 @@
 # PORTING.md — what moves from the prototype to the new repo
 
-The prototype lives at `github.com/ahmed2bassam/AIPCC` (university group project, 7 contributors,
-dormant since 2026-03-06). The new repo is a ground-up rebuild. This is the complete list of what
-crosses over.
+The prototype was built by an intern team during a cybersecurity and AI automation internship at
+ADNOC (7 contributors, dormant since 2026-03-06). This repo is a ground-up rebuild. Below is the
+complete list of what crosses over.
 
 ---
 
@@ -13,9 +13,9 @@ crosses over.
    those three credentials now** — they may already be exposed in history.
 2. **Do not copy `.git/`.** New repo, new history.
 3. **Do not copy** `__pycache__/`, `chroma_langchain_db/`, `uploads/`, `.idea/`, `node_modules/`.
-4. **Credit the prototype** in the new README: it was a team project, and the rebuild is yours. One
-   honest line — "Rebuilt from a university group prototype (link); this repo is a ground-up
-   reimplementation" — protects you and is the accurate story.
+4. **Credit the prototype** in the new README: it was a team effort, and the rebuild is yours. One
+   honest line — "Rebuilt from an internship prototype; this repo is a ground-up reimplementation" —
+   protects you and is the accurate story.
 
 ---
 

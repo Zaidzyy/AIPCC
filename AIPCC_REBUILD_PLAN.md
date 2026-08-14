@@ -5,10 +5,9 @@
 logic from the prototype (see `PORTING.md`), rewrite everything else, wire the n8n workflows in
 properly, add auth + dashboard + threat intel + export.
 
-**Why a new repo:** the prototype is a 7-contributor university group project owned by another
-account, where you hold 4 of 79 commits. Rebuilding there would flatten teammates' work and still read
-as someone else's project. In a new repo the architecture is demonstrably yours, with the original
-credited as the prototype it was.
+**Why a new repo:** the prototype is a 7-contributor intern-team codebase living on someone else's
+account. Rebuilding there would flatten teammates' work and still read as someone else's project. In
+a new repo the architecture is demonstrably yours, with the original credited as the prototype it was.
 **How to execute:** Phase by phase. Each phase ends in something that runs and demos. Never sit on a big-bang half-broken rewrite.
 
 ---
