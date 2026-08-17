@@ -8,6 +8,8 @@ Ingest a security log. Get a structured, cited, validated incident report — an
 <a href="https://zaidzyy.github.io/AIPCC/"><b>zaidzyy.github.io/AIPCC</b></a>
 </p>
 
+https://github.com/user-attachments/assets/97cdb3fe-9324-4c00-a44b-902589064aaa
+
 ![The AIPCC dashboard: KPI strip, reports-generated volume, findings by severity, top attack types](docs/images/dashboard.jpg)
 *A fresh `docker compose up` with the demo seed: 47 reports, 55 critical findings, and — the tile that matters — **10 needs attention**, reports that came back partial or failed. Every figure is a SQL `GROUP BY` over real rows, and a failed aggregate renders as `—` rather than `0`: "I could not read this" and "there are none" must never look alike on a security dashboard.*
 
