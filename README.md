@@ -8,34 +8,7 @@ Ingest a security log. Get a structured, cited, validated incident report — an
 <a href="https://zaidzyy.github.io/AIPCC/"><b>zaidzyy.github.io/AIPCC</b></a>
 </p>
 
-![The AIPCC dashboard: KPI strip, reports-generated volume, findings by severity, top attack types](docs/images/dashboard.jpg)
-*A fresh `docker compose up` with the demo seed: 47 reports, 55 critical findings, and — the tile that matters — **10 needs attention**, reports that came back partial or failed. Every figure is a SQL `GROUP BY` over real rows, and a failed aggregate renders as `—` rather than `0`: "I could not read this" and "there are none" must never look alike on a security dashboard.*
-
-AIPCC takes a security log (CSV / JSON / TXT / LOG), embeds it into a vector
-store, and generates a five-section incident report — **attack types** (MITRE
-ATT&CK-mapped), **risk assessment**, **vulnerabilities** (CVE/CWE), **anomalies**
-and an **event timeline**. The sections are written concurrently, validated
-against one canonical Pydantic schema, and repaired once if validation fails.
-Every finding cites the log rows it came from; citations the model invented are
-flagged, not quietly dropped.
-
-Around that sits what a report generator needs before anyone would use it: an
-ATT&CK matrix showing what was detected *and* what the model got wrong, an
-attack graph built from stored rows, PDF/DOCX export, revocable share links, an
-append-only audit log, cost accounting, and n8n workflows for scheduling and
-enrichment.
-
-**Rebuilt from an internship prototype.** An earlier version, built by an intern
-team during a cybersecurity and AI automation internship at ADNOC, proved that
-RAG-over-logs plus a structured report was a real idea. It was also structurally
-broken: it dropped and recreated its database on every boot, hardcoded
-`current_user`, stored plaintext passwords, stacked every page in `App.jsx` with
-no router, and its report-writing prompt and its storage layer disagreed about
-field names, so rows saved mostly null. **This repo is a ground-up
-reimplementation.** The RAG pipeline and the five section prompts were ported;
-everything else was rewritten. What happened to each defect is recorded in
-[`PORTING.md`](PORTING.md), and the six that must never come back are enforced
-by tests rather than convention — `tests/test_foundation.py::TestHardRules`.
+https://github.com/user-attachments/assets/97cdb3fe-9324-4c00-a44b-902589064aaa
 
 ---
 
@@ -66,6 +39,25 @@ The CI quality gate is a **separate** measurement on a deliberately weak recorde
 model, and it exists to catch validator regressions rather than to describe model
 quality. See [Evaluation](#evaluation) — it is worth reading before quoting any
 number from it.
+
+---
+![The AIPCC dashboard: KPI strip, reports-generated volume, findings by severity, top attack types](docs/images/dashboard.jpg)
+*A fresh `docker compose up` with the demo seed: 47 reports, 55 critical findings, and — the tile that matters — **10 needs attention**, reports that came back partial or failed. Every figure is a SQL `GROUP BY` over real rows, and a failed aggregate renders as `—` rather than `0`: "I could not read this" and "there are none" must never look alike on a security dashboard.*
+
+AIPCC takes a security log (CSV / JSON / TXT / LOG), embeds it into a vector
+store, and generates a five-section incident report — **attack types** (MITRE
+ATT&CK-mapped), **risk assessment**, **vulnerabilities** (CVE/CWE), **anomalies**
+and an **event timeline**. The sections are written concurrently, validated
+against one canonical Pydantic schema, and repaired once if validation fails.
+Every finding cites the log rows it came from; citations the model invented are
+flagged, not quietly dropped.
+
+Around that sits what a report generator needs before anyone would use it: an
+ATT&CK matrix showing what was detected *and* what the model got wrong, an
+attack graph built from stored rows, PDF/DOCX export, revocable share links, an
+append-only audit log, cost accounting, and n8n workflows for scheduling and
+enrichment.
+
 
 ---
 
@@ -99,19 +91,12 @@ schema creation from application code — that still only ever happens through
 Alembic. The alternative to seeding is a reviewer running one command, reaching
 a login form, and having no credentials: an app that is running and unusable.
 
-`--ingest` had to *become* idempotent to allow it. As a hand-run script it
-re-embedded unconditionally, which on a startup command meant another full copy
-of the same chunks per restart — quietly degrading retrieval for as long as
-nobody looked. The guard asks Chroma `count_chunks(document_id)` rather than
-inferring from "did we just create the row", because Postgres and Chroma are
-separate volumes and go out of step: a wiped vector store with the database
-intact must still re-embed.
-
 The embedding model (MiniLM, ~90 MB) is baked into the backend image. Otherwise
 the first ingest downloads it from Hugging Face *after* the build, so the
 "one command" keeps a network dependency and fails behind a rate limit with a
 stack trace instead of a report. That is most of why the backend image is
 **3.35 GB**; the frontend image is 690 MB.
+
 
 </details>
 
