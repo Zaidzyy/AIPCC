@@ -154,6 +154,12 @@ h2{font-size:clamp(1.85rem,3.6vw,2.65rem);letter-spacing:-.03em;line-height:1.14
 .two .shot{margin-top:0}
 @media(max-width:880px){.two{grid-template-columns:1fr}}
 
+/* inline video */
+.vid{margin-top:44px;border:1px solid var(--line);border-radius:10px;overflow:hidden;background:#000;
+  box-shadow:0 30px 70px -34px rgba(0,0,0,.92)}
+.vid video{width:100%;display:block;background:#000;aspect-ratio:16/9}
+.vidcap{margin-top:14px;font-size:.85rem;color:var(--mut2);font-family:var(--mono);line-height:1.6}
+
 /* ATT&CK matrix */
 .mx{margin-top:48px;border:1px solid var(--line);border-radius:8px;background:var(--panel);padding:26px;overflow:hidden}
 .mxh{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:12px;margin-bottom:22px}
@@ -211,7 +217,7 @@ footer a:hover{color:var(--green)}
     AIPCC <span class="s">SECURITY CO-PILOT</span>
   </div>
   <div class="nlinks">
-    <a href="#how">how</a><a href="#measured">measured</a><a href="#matrix">att&ck</a><a href="#system">system</a>
+    <a href="#short">watch</a><a href="#how">how</a><a href="#measured">measured</a><a href="#matrix">att&ck</a><a href="#system">system</a>
     <a class="gh" href="https://github.com/Zaidzyy/AIPCC">github ↗</a>
   </div>
 </div></nav>
@@ -239,8 +245,22 @@ footer a:hover{color:var(--green)}
   </div>
 </div></header>
 
+<section id="short"><div class="wrap">
+  <div class="rv"><div class="snum">01 <span>// the short version</span></div>
+    <h2>The whole argument, in twenty seconds.</h2>
+    <p class="lede">Five sections written concurrently, one of them repairing itself mid-run, a finding
+      traced back to the exact log rows behind it — and what happens when the model invents a citation.</p></div>
+  <div class="vid rv">
+    <video controls preload="auto" playsinline poster="images/short-version-poster.jpg">
+      <source src="aipcc.mp4" type="video/mp4">
+      <p>Your browser can’t play this video — <a href="aipcc.mp4">download it instead</a>.</p>
+    </video>
+  </div>
+  <p class="vidcap rv">20s · no narration · sound optional</p>
+</div></section>
+
 <section id="how"><div class="wrap">
-  <div class="rv"><div class="snum">01 <span>// how it works</span></div>
+  <div class="rv"><div class="snum">02 <span>// how it works</span></div>
     <h2>Five sections, written concurrently. Each one checked before it is believed.</h2>
     <p class="lede">The Python generator is authoritative — it owns the canonical schema, the repair retry and the
       section-error contract. A bad section fails <b>on its own</b> instead of sinking the report.</p></div>
@@ -254,7 +274,7 @@ footer a:hover{color:var(--green)}
 </div></section>
 
 <section id="measured"><div class="wrap">
-  <div class="rv"><div class="snum">02 <span>// measured, not claimed</span></div>
+  <div class="rv"><div class="snum">03 <span>// measured, not claimed</span></div>
     <h2>Most “AI-powered” projects can’t answer how do you know the output is any good.</h2>
     <p class="lede">Measured <b>2026-08-10</b> against <b>gemini-2.5-flash</b> on a 35-row hand-labelled golden log,
       scored against real published catalogues — ATT&CK Enterprise v17.1 (823 techniques) and CWE v4.20
@@ -287,7 +307,7 @@ footer a:hover{color:var(--green)}
 </div></section>
 
 <section id="matrix"><div class="wrap">
-  <div class="rv"><div class="snum">03 <span>// mitre att&ck</span></div>
+  <div class="rv"><div class="snum">04 <span>// mitre att&ck</span></div>
     <h2>A model that names a technique wrong fails in two different ways.</h2>
     <p class="lede">So it gets two different treatments. Neither is ever silently discarded — that would make the
       matrix look cleaner than the output behind it.</p></div>
@@ -320,7 +340,7 @@ footer a:hover{color:var(--green)}
 </div></section>
 
 <section id="system"><div class="wrap">
-  <div class="rv"><div class="snum">04 <span>// the whole system</span></div>
+  <div class="rv"><div class="snum">05 <span>// the whole system</span></div>
     <h2>Around the report sits everything a report generator needs before anyone would use it.</h2></div>
   <div class="fg rv">
     <div class="fc"><svg class="ic" viewBox="0 0 24 24"><path d="M12 2l8 4v6c0 5-3.5 8.5-8 10-4.5-1.5-8-5-8-10V6z"/><path d="M9 12l2 2 4-4"/></svg>
